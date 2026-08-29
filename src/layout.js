@@ -63,16 +63,32 @@ const BASE_CSS = `
   margin: 0 !important;
   pointer-events: auto !important;
 }
+/* 잡는 영역은 세로 전체로 넓게 두되, 보이는 것은 가운데의 짧은 그립뿐이다.
+   막대를 세로로 길게 그리면 영상과 채팅 사이에 경계선이 생겨 눈에 거슬린다. */
 #mlpp-resizer {
   position: absolute !important;
   z-index: 4 !important;
-  background-color: #222 !important;
-  border-left: 1px solid #3a3a3a !important;
+  background-color: transparent !important;
+  border: 0 !important;
   cursor: col-resize !important;
   pointer-events: auto !important;
-  transition: background-color 120ms ease-in-out !important;
 }
-#mlpp-resizer:hover, #mlpp-resizer.mlpp-dragging { background-color: #555 !important; }
+#mlpp-resizer::after {
+  content: '' !important;
+  position: absolute !important;
+  left: 1px !important;
+  right: 1px !important;
+  top: 50% !important;
+  height: 56px !important;
+  transform: translateY(-50%) !important;
+  border-radius: 2px !important;
+  background-color: rgba(255, 255, 255, 0.1) !important;
+  transition: background-color 120ms ease-in-out, height 120ms ease-in-out !important;
+}
+#mlpp-resizer:hover::after, #mlpp-resizer.mlpp-dragging::after {
+  height: 80px !important;
+  background-color: rgba(255, 255, 255, 0.4) !important;
+}
 `;
 
 /**
@@ -151,11 +167,17 @@ export function startLayout(hooks, chatsRoot, chats) {
     const mode = settings.layoutMode();
     const cw = chatWidth();
 
+    const forceCols = settings.get('gridCols');
+    const forceRows = settings.get('gridRows');
+
     let layout = null;
-    if (chatVisible && mode !== 'side') {
+    // 수동 격자를 지정하면 영상이 여러 행에 놓이므로 "영상 아래 자기 채팅"이 성립하지 않는다. 사이드로 간다.
+    if (chatVisible && forceCols <= 0 && mode !== 'side') {
       layout = columnLayout(n, W, H, gap, settings.get('minColumnWidth'), mode === 'columns');
     }
-    if (!layout) layout = sideLayout(n, W, H, gap, cw, RESIZER_WIDTH, chatVisible);
+    if (!layout) {
+      layout = sideLayout(n, W, H, gap, cw, RESIZER_WIDTH, chatVisible, forceCols, forceRows);
+    }
 
     const columns = layout.mode === 'columns';
     // 안 보이는 채팅도 크기를 유지해야 뒤에서 계속 내려간다. 사이드 패널 자리를 빌려 쓴다.

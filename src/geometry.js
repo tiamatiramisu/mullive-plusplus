@@ -2,7 +2,7 @@
  * 배치 기하 계산. 순수 함수만 둔다.
  *
  * 두 가지 모드가 있다.
- * - columns: 영상 1행, 각 영상 바로 아래에 그 방송의 채팅. 모든 채팅이 동시에 보인다.
+ * - columns: 영상을 한 행에 늘어놓고 각 영상 바로 아래에 그 방송의 채팅. 모든 채팅이 동시에 보인다.
  * - side:    영상 격자 + 오른쪽 단일 채팅 패널.
  */
 
@@ -16,9 +16,35 @@ const MIN_CHAT_HEIGHT = 160;
  * @typedef {object} Layout
  * @property {'columns' | 'side'} mode
  * @property {Rect[]} videos            스트림 순서대로
- * @property {Rect[]} chats             columns: 스트림마다 하나. side: 활성 채팅 자리 1개(숨김이면 0개)
+ * @property {Rect[]} chats             columns: 스트림마다 하나. side: 활성 채팅 자리 하나(숨김이면 빈 배열)
  * @property {Rect | null} resizer
  */
+
+/** @typedef {{ cols: number, rows: number, w: number, h: number }} Grid */
+
+/**
+ * 열·행 수를 정해놓고 그 안에 들어가는 최대 16:9 타일을 구한다.
+ * @param {number} cols
+ * @param {number} rows
+ * @param {number} availW
+ * @param {number} availH
+ * @param {number} gap
+ * @returns {Grid | null}
+ */
+export function gridWith(cols, rows, availW, availH, gap) {
+  if (cols <= 0 || rows <= 0 || availW <= 0 || availH <= 0) return null;
+  const cellW = Math.floor((availW - gap * (cols - 1)) / cols);
+  const cellH = Math.floor((availH - gap * (rows - 1)) / rows);
+  if (cellW <= 0 || cellH <= 0) return null;
+
+  let w = cellW;
+  let h = Math.floor(cellW / ASPECT);
+  if (h > cellH) {
+    h = cellH;
+    w = Math.floor(cellH * ASPECT);
+  }
+  return w > 0 && h > 0 ? { cols, rows, w, h } : null;
+}
 
 /**
  * 영역을 16:9 타일 n개로 덮는 배치 중 타일이 가장 큰 것.
@@ -26,27 +52,15 @@ const MIN_CHAT_HEIGHT = 160;
  * @param {number} availW
  * @param {number} availH
  * @param {number} gap
- * @returns {{ cols: number, rows: number, w: number, h: number } | null}
+ * @returns {Grid | null}
  */
 export function computeGrid(n, availW, availH, gap) {
-  if (n <= 0 || availW <= 0 || availH <= 0) return null;
-
-  /** @type {{ cols: number, rows: number, w: number, h: number } | null} */
+  if (n <= 0) return null;
+  /** @type {Grid | null} */
   let best = null;
   for (let cols = 1; cols <= n; cols++) {
-    const rows = Math.ceil(n / cols);
-    const cellW = Math.floor((availW - gap * (cols - 1)) / cols);
-    const cellH = Math.floor((availH - gap * (rows - 1)) / rows);
-    if (cellW <= 0 || cellH <= 0) continue;
-
-    let w = cellW;
-    let h = Math.floor(cellW / ASPECT);
-    if (h > cellH) {
-      h = cellH;
-      w = Math.floor(cellH * ASPECT);
-    }
-    if (w <= 0 || h <= 0) continue;
-    if (!best || w > best.w) best = { cols, rows, w, h };
+    const grid = gridWith(cols, Math.ceil(n / cols), availW, availH, gap);
+    if (grid && (!best || grid.w > best.w)) best = grid;
   }
   return best;
 }
@@ -99,12 +113,16 @@ export function columnLayout(n, W, H, gap, minColumnWidth, force = false) {
  * @param {number} chatWidth
  * @param {number} resizerWidth
  * @param {boolean} chatVisible
+ * @param {number} [forceCols] 지정하면 이 열 수로 고정한다 (0 = 자동)
+ * @param {number} [forceRows] 지정하면 최소 이 행 수를 확보한다. 빈 칸이 남을 수 있다 (0 = 자동)
  * @returns {Layout}
  */
-export function sideLayout(n, W, H, gap, chatWidth, resizerWidth, chatVisible) {
+export function sideLayout(n, W, H, gap, chatWidth, resizerWidth, chatVisible, forceCols = 0, forceRows = 0) {
   const reserved = chatVisible ? chatWidth + resizerWidth : 0;
   const availW = W - reserved;
-  const grid = computeGrid(n, availW, H, gap);
+  const grid = forceCols > 0
+    ? gridWith(forceCols, Math.max(forceRows, Math.ceil(n / forceCols)), availW, H, gap)
+    : computeGrid(n, availW, H, gap);
 
   /** @type {Rect[]} */ const videos = [];
   if (grid) {

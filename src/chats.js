@@ -8,7 +8,7 @@ const stagger = () => settings.get('chatStagger');
  *
  * - 한 방송당 iframe 하나. 한 번 만들면 계속 살려둔다. 활성 채팅을 바꿔도 다시 로드되지 않는다.
  * - 안 보이는 채팅은 크기를 유지한 채 visibility로만 감춘다.
- *   display:none으로 접으면 크기가 0이 되어 뒤에서 채팅이 내려가지 않는다.
+ *   display:none으로 접으면 크기가 사라져 뒤에서 채팅이 내려가지 않는다.
  * - 유지 상한을 넘기면 오래 안 본 것부터 display:none으로 렌더만 멈춘다. 문서와 연결은 남는다.
  * - 채팅 페이지는 사실상 SOOP 플레이어 페이지 전체라 로딩이 길다. 그 동안 검은 화면만 보이면
  *   고장인지 로딩인지 구분할 수 없으므로 자리 표시자를 깐다.
@@ -127,7 +127,7 @@ export function createChatManager(hooks, root, canCreate) {
   /**
    * 보여야 할 채팅을 정하고, 상한에 따라 나머지 상태를 계산한다.
    * @param {number[]} visible 보여야 할 스트림 인덱스
-   * @param {number} limit 0이면 무제한
+   * @param {number} limit 동시 유지 상한 (0 = 무제한)
    * @returns {{ index: number, frame: HTMLIFrameElement, state: ChatState }[]}
    */
   function sync(visible, limit) {
