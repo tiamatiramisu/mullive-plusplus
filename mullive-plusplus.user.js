@@ -4,7 +4,7 @@
 // @name:en      Mul.Live Multiview Enhancer
 // @name:ja-JP   Mul.Live マルチビュー強化
 // @namespace    http://tampermonkey.net/
-// @version      0.3.2
+// @version      0.4.0
 // @license      MIT
 // @description       Resizable chat panel, background-persistent chats, smarter video grid layout and drag-to-swap tiles for Mul.Live.
 // @description:en    Resizable chat panel, background-persistent chats, smarter video grid layout and drag-to-swap tiles for Mul.Live.
@@ -247,6 +247,28 @@
   function layoutMode() {
     return LAYOUT_MODES[raw("layoutMode")] ?? "auto";
   }
+  var orderMemory = /* @__PURE__ */ new Map();
+  function loadOrder(key, n) {
+    const identity = Array.from({ length: n }, (_, i) => i);
+    let stored = orderMemory.get(key) ?? null;
+    try {
+      if (typeof GM_getValue === "function") stored = GM_getValue(key, stored);
+    } catch {
+    }
+    if (!Array.isArray(stored) || stored.length !== n) return identity;
+    const ok = stored.every((v) => Number.isInteger(v) && v >= 0 && v < n) && new Set(stored).size === n;
+    return ok ? (
+      /** @type {number[]} */
+      stored
+    ) : identity;
+  }
+  function saveOrder(key, value) {
+    orderMemory.set(key, value);
+    try {
+      if (typeof GM_setValue === "function") GM_setValue(key, value);
+    } catch {
+    }
+  }
   function set(key, value) {
     memory.set(key, value);
     try {
@@ -439,12 +461,162 @@
     };
   }
 
+  // src/dnd.js
+  var MODIFIER_HINT = "Alt(Option)을 누른 채 끌어서 위치 교환";
+  var BASE_CSS = `
+.mlpp-tile {
+  position: absolute !important;
+  z-index: 6 !important;
+  display: none !important;
+  align-items: flex-start !important;
+  justify-content: center !important;
+  box-sizing: border-box !important;
+  padding-top: 10px !important;
+  border: 3px solid rgba(255, 255, 255, 0.35) !important;
+  border-radius: 6px !important;
+  background-color: rgba(0, 0, 0, 0.4) !important;
+  cursor: grab !important;
+  pointer-events: none !important;
+  user-select: none !important;
+}
+/* 영상 밝기와 무관하게 읽히도록 라벨에 배경을 준다. */
+.mlpp-tile-label {
+  padding: 4px 10px !important;
+  border-radius: 999px !important;
+  background-color: rgba(17, 18, 20, 0.9) !important;
+  color: #fff !important;
+  font-size: 13px !important;
+  font-weight: 700 !important;
+  line-height: 1.2 !important;
+  white-space: nowrap !important;
+}
+html.mlpp-swap .mlpp-tile {
+  display: flex !important;
+  pointer-events: auto !important;
+}
+html.mlpp-swap .mlpp-tile:hover { border-color: #7aa2f7 !important; }
+.mlpp-tile.mlpp-from {
+  border-color: #7aa2f7 !important;
+  background-color: rgba(122, 162, 247, 0.25) !important;
+  cursor: grabbing !important;
+}
+.mlpp-tile.mlpp-over {
+  border-color: #9ece6a !important;
+  background-color: rgba(158, 206, 106, 0.25) !important;
+}
+`;
+  function createDragSwap({ root, labelOf, swap, schedule }) {
+    let rects = [];
+    const overlays = /* @__PURE__ */ new Map();
+    let active = false;
+    let from = -1;
+    let over = -1;
+    let shield = null;
+    function ensureOverlay(slot) {
+      const existing = overlays.get(slot);
+      if (existing) return existing;
+      const el = document.createElement("div");
+      el.id = `mlpp-tile-${slot}`;
+      el.className = "mlpp-tile";
+      const label = document.createElement("span");
+      label.className = "mlpp-tile-label";
+      el.append(label);
+      el.addEventListener("pointerdown", (e) => onDown(e, slot));
+      root.append(el);
+      overlays.set(slot, el);
+      return el;
+    }
+    function slotAt(x, y) {
+      return rects.findIndex((r) => x >= r.x && x < r.x + r.w && y >= r.y && y < r.y + r.h);
+    }
+    function paint() {
+      const rules = [BASE_CSS];
+      rects.forEach((r, slot) => {
+        const el = ensureOverlay(slot);
+        const label = el.querySelector(".mlpp-tile-label");
+        if (label) label.textContent = labelOf(slot);
+        el.classList.toggle("mlpp-from", slot === from);
+        el.classList.toggle("mlpp-over", slot === over && slot !== from);
+        rules.push(
+          `#${el.id} { left: ${r.x}px !important; top: ${r.y}px !important; width: ${r.w}px !important; height: ${r.h}px !important; }`
+        );
+      });
+      for (const [slot, el] of overlays) {
+        if (slot >= rects.length) rules.push(`#${el.id} { display: none !important; }`);
+      }
+      setStyle("dnd", rules.join("\n"));
+    }
+    function setActive(next) {
+      if (active === next) return;
+      active = next;
+      document.documentElement.classList.toggle("mlpp-swap", active);
+      if (!active) endDrag(false);
+    }
+    function onDown(e, slot) {
+      if (!active || e.button !== 0) return;
+      e.preventDefault();
+      e.stopPropagation();
+      from = slot;
+      over = slot;
+      shield = document.createElement("div");
+      shield.style.cssText = "position:fixed;inset:0;z-index:2147483646;cursor:grabbing";
+      document.body.append(shield);
+      document.addEventListener("pointermove", onMove);
+      document.addEventListener("pointerup", onUp);
+      document.addEventListener("pointercancel", onCancel);
+      paint();
+    }
+    function onMove(e) {
+      const next = slotAt(e.clientX, e.clientY);
+      if (next === over) return;
+      over = next;
+      paint();
+    }
+    function onUp(e) {
+      const target = slotAt(e.clientX, e.clientY);
+      const source = from;
+      endDrag(true);
+      if (source >= 0 && target >= 0 && target !== source) {
+        swap(source, target);
+        schedule();
+      }
+    }
+    function onCancel() {
+      endDrag(true);
+    }
+    function endDrag(repaint) {
+      document.removeEventListener("pointermove", onMove);
+      document.removeEventListener("pointerup", onUp);
+      document.removeEventListener("pointercancel", onCancel);
+      shield?.remove();
+      shield = null;
+      from = -1;
+      over = -1;
+      if (repaint) paint();
+    }
+    window.addEventListener("keydown", (e) => {
+      if (e.key === "Alt") setActive(true);
+    });
+    window.addEventListener("keyup", (e) => {
+      if (e.key === "Alt") setActive(false);
+    });
+    window.addEventListener("blur", () => setActive(false));
+    return {
+      /** @param {import('./geometry.js').Rect[]} videoRects */
+      update(videoRects) {
+        rects = videoRects;
+        paint();
+      },
+      hint: MODIFIER_HINT
+    };
+  }
+
   // src/layout.js
   var RESIZER_WIDTH = 6;
   var SELECT_HEIGHT = 28;
   var MIN_CHAT_WIDTH = 240;
   var DEFAULT_CHAT_WIDTH = 350;
-  var BASE_CSS = `
+  var BASE_CSS2 = `
 #streams {
   position: absolute !important;
   inset: 0 !important;
@@ -514,6 +686,22 @@
     let timer = 0;
     let chatVisible = true;
     let active = chats.firstUsable();
+    const orderKey = `order:${location.pathname}`;
+    let order = loadOrder(orderKey, hooks.players.length);
+    const dnd = createDragSwap({
+      root: chatsRoot,
+      labelOf: (slot) => hooks.chatSelect.options[order[slot]]?.textContent ?? "",
+      swap: (a, b) => {
+        [order[a], order[b]] = [order[b], order[a]];
+        saveOrder(orderKey, order);
+      },
+      schedule: () => schedule()
+    });
+    function resetOrder() {
+      order = hooks.players.map((_, i) => i);
+      saveOrder(orderKey, order);
+      schedule();
+    }
     let dragWidth = (
       /** @type {number | null} */
       null
@@ -546,16 +734,18 @@
       const visible = columns ? chats.usable : chatVisible && active >= 0 ? [active] : [];
       const slots = /* @__PURE__ */ new Map();
       if (columns) {
-        for (const i of visible) {
-          const r = layout.chats[i];
-          if (r) slots.set(i, r);
-        }
+        layout.chats.forEach((r, slot) => {
+          const stream = order[slot];
+          if (visible.includes(stream)) slots.set(stream, r);
+        });
       } else if (visible.length > 0 && layout.chats[0]) {
         slots.set(visible[0], layout.chats[0]);
       }
       const states = chats.sync(visible, get("chatLimit"));
-      const rules = [BASE_CSS];
-      layout.videos.forEach((r, i) => rules.push(place(`#streams iframe:nth-child(${i + 1})`, r)));
+      const rules = [BASE_CSS2];
+      layout.videos.forEach((r, slot) => {
+        rules.push(place(`#streams iframe:nth-child(${order[slot] + 1})`, r));
+      });
       for (const [index, slot] of slots) {
         if (chats.isLoaded(index)) continue;
         const ph = chats.ensurePlaceholder(index);
@@ -591,6 +781,7 @@
       rules.push(`#chat-toggle .open { display: ${chatVisible ? "none" : "inline"} !important; }`);
       rules.push(`#chat-toggle .close { display: ${chatVisible ? "inline" : "none"} !important; }`);
       setStyle("layout", rules.join("\n"));
+      dnd.update(layout.videos);
     }
     function schedule() {
       if (timer) return;
@@ -665,7 +856,7 @@
     onChange(schedule);
     chats.onFrameLoad(schedule);
     render();
-    return { schedule, render };
+    return { schedule, render, resetOrder, swapHint: dnd.hint };
   }
 
   // src/ready.js
@@ -748,7 +939,11 @@
       if (timedOut()) warn("플레이어 준비 신호를 받지 못해 채팅을 그대로 만듭니다.");
       layout.schedule();
     });
+    if (typeof GM_registerMenuCommand === "function") {
+      GM_registerMenuCommand("영상 순서 초기화", () => layout.resetOrder());
+    }
     log(`v${VERSION} booted`, {
+      swap: layout.swapHint,
       style: getStyleMode(),
       mode: layoutMode(),
       players: hooks.players.length,
