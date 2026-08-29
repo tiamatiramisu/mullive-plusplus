@@ -1,6 +1,6 @@
 # mullive-plusplus STATUS
 
-현재 버전: `v0.1.0` / GitHub: `tiamatiramisu/mullive-plusplus` / Greasy Fork: [593484](https://greasyfork.org/ko/scripts/593484)
+현재 버전: `v0.2.1` / GitHub: `tiamatiramisu/mullive-plusplus` / Greasy Fork: [593484](https://greasyfork.org/ko/scripts/593484)
 
 ## 스테이지
 
@@ -157,3 +157,11 @@ greasyfork `lib/github.rb`의 `info_from_release_event` → `file_from_root_for_
 대응: 빌드 산출물을 저장소 루트에 커밋하고, 그 커밋에 태그를 단다(`release.mjs`).
 워크플로우는 소스에서 다시 빌드해 커밋된 산출물과 `diff`로 대조하므로,
 산출물을 갱신하지 않고 태그만 밀면 릴리스가 실패한다.
+
+**검증** — `npm run release -- 0.2.1` → Actions 성공 → 웹훅 배달 응답:
+
+```json
+{"updated_scripts":["https://api.greasyfork.org/ko/scripts/593484-..."],"updated_failed":[]}
+```
+
+Greasy Fork 버전 이력에 `v0.2.1` 등재 확인. 파이프라인 끝단까지 동작.
