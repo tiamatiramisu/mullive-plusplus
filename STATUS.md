@@ -17,7 +17,7 @@ Stage 1(업스트림 분석)은 `SPEC.md`로 완료.
 - [x] esbuild 번들 + `meta.js` 배너 · 태그→`@version` 주입
 - [x] `jsconfig.json` checkJs 타입체크
 - [x] GitHub repo 생성 · SSH 원격 · 최초 push
-- [x] 태그 릴리스 워크플로우 (`v0.1.0` 성공, 에셋 `mullive-plusplus.user.js` 5617 B)
+- [x] 태그 릴리스 워크플로우 (`v0.1.0` 성공, 에셋 `mullive-plusplus.user.js` 6044 B)
 - [x] Greasy Fork `release` 웹훅 등록 (hook id `671923702`, ping → 200 OK)
 - [x] 페이지 훅 표 실사이트 검증
 - [x] CSP 주입 경로 실측 → `style.js` 판정 로직 수정
@@ -45,7 +45,11 @@ Stage 1(업스트림 분석)은 `SPEC.md`로 완료.
 **릴리스 파이프라인** — `v0.1.0` 태그 push → Actions 성공 → 릴리스 에셋 생성.
 `https://github.com/tiamatiramisu/mullive-plusplus/releases/latest/download/mullive-plusplus.user.js`
 → HTTP 200, 배포된 파일의 `@version` = `0.1.0` (태그값 주입 확인).
-웹훅 ping 배달 → Greasy Fork `200 OK`.
+웹훅 배달 → Greasy Fork 전부 `200 OK` (`ping`, `release.created/published/released/edited/deleted`).
+
+**개명** — 공식 확장 "Mul.Live Plus"와의 혼동을 피해 repo·산출물·콘솔 태그를 `mullive-plusplus`로 변경.
+repo 이름을 바꿔도 웹훅(id `671923702`)은 그대로 유지됨을 확인. Greasy Fork 등록 전이라
+기존 `v0.1.0` 릴리스·태그를 삭제하고 새 이름으로 다시 잘랐다.
 
 **페이지 훅** — 실제 Chrome, `https://mul.live/khm11903/phonics1/ecvhao` (SOOP 3개), 뷰포트 560×862:
 
