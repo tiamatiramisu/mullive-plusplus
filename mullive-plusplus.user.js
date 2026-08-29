@@ -4,7 +4,7 @@
 // @name:en      Mul.Live Multiview Enhancer
 // @name:ja-JP   Mul.Live マルチビュー強化
 // @namespace    http://tampermonkey.net/
-// @version      0.2.1
+// @version      0.3.0
 // @license      MIT
 // @description       Resizable chat panel, background-persistent chats, smarter video grid layout and drag-to-swap tiles for Mul.Live.
 // @description:en    Resizable chat panel, background-persistent chats, smarter video grid layout and drag-to-swap tiles for Mul.Live.
@@ -21,6 +21,7 @@
 // @grant        GM_registerMenuCommand
 // @grant        GM_unregisterMenuCommand
 // @grant        GM_addValueChangeListener
+// @require      https://github.com/PRO-2684/GM_config/releases/download/v1.2.2/config.js#md5=fca1967de605996e44d14d2eab403706
 // ==/UserScript==
 
 "use strict";
@@ -165,28 +166,151 @@
   }
 
   // src/settings.js
+  var LAYOUT_MODES = (
+    /** @type {const} */
+    ["auto", "columns", "side"]
+  );
+  var DESC = {
+    $default: { autoClose: false },
+    layoutMode: {
+      name: "레이아웃",
+      title: "자동: 가로 화면이고 열 폭이 충분하면 열 모드, 아니면 사이드 모드",
+      type: "enum",
+      options: ["자동", "열 — 영상 아래 각자 채팅", "사이드 — 단일 채팅"],
+      value: 0
+    },
+    minColumnWidth: {
+      name: "열 모드 최소 열 폭 (px)",
+      title: "열 하나의 폭이 곧 영상 폭이자 채팅 폭이다. 이보다 좁아지면 사이드 모드로 내려간다.",
+      type: "int",
+      value: 400,
+      min: 240,
+      max: 1200
+    },
+    chatWidth: { name: "사이드 채팅 폭 (px)", title: "리사이저를 끌어도 바뀐다.", type: "int", value: 350, min: 240, max: 1600 },
+    tileGap: { name: "타일 간격 (px)", type: "int", value: 4, min: 0, max: 40 },
+    chatLimit: {
+      name: "동시 유지 채팅 수 (0 = 무제한)",
+      title: "유지 중인 채팅이 이 수를 넘으면 오래 안 본 것부터 렌더를 멈춘다. 연결은 유지되므로 다시 열면 즉시 보인다.",
+      type: "int",
+      value: 0,
+      min: 0,
+      max: 20
+    }
+  };
+  var DEFAULTS = Object.fromEntries(
+    Object.entries(DESC).filter(([k]) => k !== "$default").map(([k, v]) => [
+      k,
+      /** @type {any} */
+      v.value
+    ])
+  );
+  var config = null;
   var memory = /* @__PURE__ */ new Map();
-  function load(key, fallback) {
+  var listeners = /* @__PURE__ */ new Set();
+  function init() {
     try {
-      if (typeof GM_getValue === "function") return GM_getValue(key, fallback);
+      if (typeof GM_config !== "undefined") {
+        config = new GM_config(DESC);
+        config.addEventListener("set", () => listeners.forEach((fn) => fn()));
+        return;
+      }
+    } catch {
+      config = null;
+    }
+  }
+  function onChange(fn) {
+    listeners.add(fn);
+  }
+  function raw(key) {
+    if (config) {
+      const v = config.get(key);
+      if (typeof v === "number") return v;
+    }
+    try {
+      if (typeof GM_getValue === "function") return Number(GM_getValue(key, DEFAULTS[key]));
     } catch {
     }
-    return memory.has(key) ? (
-      /** @type {T} */
-      memory.get(key)
-    ) : fallback;
+    return memory.get(key) ?? DEFAULTS[key];
   }
-  function save(key, value) {
+  function get(key) {
+    return raw(key);
+  }
+  function layoutMode() {
+    return LAYOUT_MODES[raw("layoutMode")] ?? "auto";
+  }
+  function set(key, value) {
     memory.set(key, value);
     try {
+      if (config) {
+        config.set(key, value);
+        return;
+      }
       if (typeof GM_setValue === "function") GM_setValue(key, value);
     } catch {
     }
+    listeners.forEach((fn) => fn());
   }
 
-  // src/layout.js
+  // src/chats.js
+  function createChatManager(hooks, root) {
+    const options = readChatOptions(hooks.chatSelect);
+    const frames = /* @__PURE__ */ new Map();
+    const lastShown = /* @__PURE__ */ new Map();
+    const usable = options.filter((o) => !o.disabled).map((o) => o.index);
+    function ensure(index) {
+      const existing = frames.get(index);
+      if (existing) return existing;
+      const option = options[index];
+      if (!option || option.disabled) return null;
+      const frame = document.createElement("iframe");
+      frame.id = `mlpp-chat-${index}`;
+      frame.setAttribute("frameborder", "0");
+      frame.setAttribute("scrolling", "no");
+      frame.name = `mlpp-chat-${index}`;
+      frame.src = option.url;
+      root.append(frame);
+      frames.set(index, frame);
+      return frame;
+    }
+    function sync(visible, limit) {
+      const now = Date.now();
+      const shown = visible.filter((i) => ensure(i) !== null);
+      shown.forEach((i) => lastShown.set(i, now));
+      const hidden = [...frames.keys()].filter((i) => !shown.includes(i)).sort((a, b) => (lastShown.get(b) ?? 0) - (lastShown.get(a) ?? 0));
+      const keepHidden = limit > 0 ? Math.max(0, limit - shown.length) : hidden.length;
+      const result = [];
+      for (const index of shown) {
+        result.push({ index, frame: (
+          /** @type {HTMLIFrameElement} */
+          frames.get(index)
+        ), state: "visible" });
+      }
+      hidden.forEach((index, rank) => {
+        result.push({
+          index,
+          frame: (
+            /** @type {HTMLIFrameElement} */
+            frames.get(index)
+          ),
+          state: rank < keepHidden ? "hidden" : "suspended"
+        });
+      });
+      return result;
+    }
+    return {
+      options,
+      usable,
+      ensure,
+      sync,
+      /** 선택 가능한 첫 채팅. 없으면 -1. */
+      firstUsable: () => usable[0] ?? -1
+    };
+  }
+
+  // src/geometry.js
   var ASPECT = 16 / 9;
-  var SLACK = 2;
+  var MIN_CHAT_HEIGHT = 160;
   function computeGrid(n, availW, availH, gap) {
     if (n <= 0 || availW <= 0 || availH <= 0) return null;
     let best = null;
@@ -206,126 +330,226 @@
     }
     return best;
   }
-  function isChatVisible(hooks) {
-    return hooks.chat.getAttribute("src") !== "about:blank";
+  function columnLayout(n, W, H, gap, minColumnWidth, force = false) {
+    if (n < 1 || W <= 0 || H <= 0) return null;
+    if (!force && (n < 2 || W < H)) return null;
+    const colW = Math.floor((W - gap * (n - 1)) / n);
+    if (colW <= 0) return null;
+    if (!force && colW < minColumnWidth) return null;
+    const videoH = Math.floor(colW / ASPECT);
+    const chatY = videoH + gap;
+    const chatH = H - chatY;
+    if (chatH < MIN_CHAT_HEIGHT) return null;
+    const videos = [];
+    const chats = [];
+    for (let i = 0; i < n; i++) {
+      const x = i * (colW + gap);
+      videos.push({ x, y: 0, w: colW, h: videoH });
+      chats.push({ x, y: chatY, w: colW, h: chatH });
+    }
+    return { mode: "columns", videos, chats, resizer: null };
   }
-  function startLayout(hooks, reservedWidth) {
-    let timer = 0;
-    function apply() {
-      timer = 0;
-      const gap = load("tileGap", 4);
-      const reserved = isChatVisible(hooks) ? reservedWidth() : 0;
-      const availW = window.innerWidth - reserved - SLACK;
-      const availH = window.innerHeight - SLACK;
-      const grid = computeGrid(hooks.players.length, availW, availH, gap);
-      if (!grid) return;
-      setStyle(
-        "layout",
-        `#streams {
-  gap: ${gap}px !important;
-  width: auto !important;
-  min-width: 0 !important;
-  align-content: center !important;
-  justify-content: center !important;
-}
-#streams iframe {
-  flex: 0 0 auto !important;
-  width: ${grid.w}px !important;
-  height: ${grid.h}px !important;
-}`
-      );
+  function sideLayout(n, W, H, gap, chatWidth, resizerWidth, chatVisible) {
+    const reserved = chatVisible ? chatWidth + resizerWidth : 0;
+    const availW = W - reserved;
+    const grid = computeGrid(n, availW, H, gap);
+    const videos = [];
+    if (grid) {
+      const totalH = grid.rows * grid.h + gap * (grid.rows - 1);
+      const y0 = Math.floor((H - totalH) / 2);
+      for (let i = 0; i < n; i++) {
+        const row = Math.floor(i / grid.cols);
+        const col = i % grid.cols;
+        const inRow = Math.min(grid.cols, n - row * grid.cols);
+        const rowW = inRow * grid.w + gap * (inRow - 1);
+        const x0 = Math.floor((availW - rowW) / 2);
+        videos.push({ x: x0 + col * (grid.w + gap), y: y0 + row * (grid.h + gap), w: grid.w, h: grid.h });
+      }
     }
-    function schedule() {
-      if (timer) return;
-      timer = setTimeout(apply, 0);
-    }
-    window.addEventListener("resize", schedule);
-    hooks.chat.addEventListener("load", schedule);
-    new MutationObserver(schedule).observe(hooks.chat, {
-      attributes: true,
-      attributeFilter: ["src"]
-    });
-    apply();
-    return { schedule };
+    return {
+      mode: "side",
+      videos,
+      chats: chatVisible ? [{ x: W - chatWidth, y: 0, w: chatWidth, h: H }] : [],
+      resizer: chatVisible ? { x: W - chatWidth - resizerWidth, y: 0, w: resizerWidth, h: H } : null
+    };
   }
 
-  // src/chat.js
-  var DEFAULT_WIDTH = 350;
-  var MIN_WIDTH = 240;
+  // src/layout.js
   var RESIZER_WIDTH = 6;
-  var RESIZER_ID = "mlpp-resizer";
-  function maxWidth() {
-    return Math.max(MIN_WIDTH, Math.floor(window.innerWidth * 0.6));
-  }
-  function clampWidth(w) {
-    return Math.min(maxWidth(), Math.max(MIN_WIDTH, Math.round(w)));
-  }
-  function setupChatResizer(hooks) {
-    let preferred = Number(load("chatWidth", DEFAULT_WIDTH)) || DEFAULT_WIDTH;
-    const effective = () => clampWidth(preferred);
-    let onChange = null;
-    const resizer = document.createElement("div");
-    resizer.id = RESIZER_ID;
-    resizer.title = "채팅 폭 조절 (더블클릭: 기본값)";
-    hooks.chatContainer.before(resizer);
-    function paint() {
-      const visible = isChatVisible(hooks);
-      const width = effective();
-      setStyle(
-        "chat",
-        `#chat-container {
-  flex: 0 0 ${width}px !important;
-  width: ${width}px !important;
-  max-width: none !important;
+  var SELECT_HEIGHT = 28;
+  var MIN_CHAT_WIDTH = 240;
+  var DEFAULT_CHAT_WIDTH = 350;
+  var BASE_CSS = `
+#streams {
+  position: absolute !important;
+  inset: 0 !important;
+  display: block !important;
+  width: auto !important;
+  height: auto !important;
+  min-width: 0 !important;
+  pointer-events: none !important;
 }
-#${RESIZER_ID} {
-  display: ${visible ? "block" : "none"} !important;
-  flex: 0 0 ${RESIZER_WIDTH}px !important;
-  align-self: stretch !important;
+#streams iframe {
+  position: absolute !important;
+  flex: none !important;
+  aspect-ratio: auto !important;
+  pointer-events: auto !important;
+}
+#chat-container { display: none !important; }
+#mlpp-chats {
+  position: absolute !important;
+  inset: 0 !important;
+  pointer-events: none !important;
+}
+#mlpp-chats iframe {
+  position: absolute !important;
+  border: 0 !important;
+  background-color: #141517 !important;
+  pointer-events: auto !important;
+}
+#chat-select {
+  position: absolute !important;
+  z-index: 5 !important;
+  margin: 0 !important;
+  pointer-events: auto !important;
+}
+#mlpp-resizer {
+  position: absolute !important;
+  z-index: 4 !important;
   background-color: #222 !important;
   border-left: 1px solid #3a3a3a !important;
   cursor: col-resize !important;
+  pointer-events: auto !important;
   transition: background-color 120ms ease-in-out !important;
 }
-#${RESIZER_ID}:hover, #${RESIZER_ID}.mlpp-dragging {
-  background-color: #555 !important;
-}`
-      );
+#mlpp-resizer:hover, #mlpp-resizer.mlpp-dragging { background-color: #555 !important; }
+`;
+  function place(selector, r, extra = "") {
+    return `${selector} { left: ${r.x}px !important; top: ${r.y}px !important; width: ${r.w}px !important; height: ${r.h}px !important; ${extra} }`;
+  }
+  function startLayout(hooks, chatsRoot, chats) {
+    hooks.chatToggle.before(chatsRoot);
+    chatsRoot.append(hooks.chatSelect);
+    const resizer = document.createElement("div");
+    resizer.id = "mlpp-resizer";
+    resizer.title = "채팅 폭 조절 (더블클릭: 기본값)";
+    chatsRoot.append(resizer);
+    let timer = 0;
+    let chatVisible = true;
+    let active = chats.firstUsable();
+    let dragWidth = (
+      /** @type {number | null} */
+      null
+    );
+    function blankPageChat() {
+      if (hooks.chat.getAttribute("src") !== "about:blank") hooks.chat.src = "about:blank";
     }
-    function setWidth(next) {
-      const w = clampWidth(next);
-      if (w === preferred) return;
-      preferred = w;
-      paint();
-      onChange?.();
+    new MutationObserver(blankPageChat).observe(hooks.chat, { attributes: true, attributeFilter: ["src"] });
+    blankPageChat();
+    function chatWidth() {
+      const raw2 = dragWidth ?? get("chatWidth");
+      const max = Math.max(MIN_CHAT_WIDTH, Math.floor(window.innerWidth * 0.6));
+      return Math.min(max, Math.max(MIN_CHAT_WIDTH, Math.round(raw2)));
     }
-    function repaint() {
-      paint();
-      onChange?.();
+    function render() {
+      timer = 0;
+      const W = window.innerWidth;
+      const H = window.innerHeight;
+      const n = hooks.players.length;
+      const gap = get("tileGap");
+      const mode2 = layoutMode();
+      const cw = chatWidth();
+      let layout = null;
+      if (chatVisible && mode2 !== "side") {
+        layout = columnLayout(n, W, H, gap, get("minColumnWidth"), mode2 === "columns");
+      }
+      if (!layout) layout = sideLayout(n, W, H, gap, cw, RESIZER_WIDTH, chatVisible);
+      const columns = layout.mode === "columns";
+      const parked = { x: W - cw, y: SELECT_HEIGHT, w: cw, h: Math.max(1, H - SELECT_HEIGHT) };
+      const visible = columns ? chats.usable : chatVisible && active >= 0 ? [active] : [];
+      const states = chats.sync(visible, get("chatLimit"));
+      const rules = [BASE_CSS];
+      layout.videos.forEach((r, i) => rules.push(place(`#streams iframe:nth-child(${i + 1})`, r)));
+      for (const { index, state } of states) {
+        const selector = `#mlpp-chat-${index}`;
+        if (state === "suspended") {
+          rules.push(`${selector} { display: none !important; }`);
+          continue;
+        }
+        let slot = parked;
+        if (state === "visible") {
+          const found = columns ? layout.chats[index] : layout.chats[0];
+          if (!found) continue;
+          slot = found;
+        }
+        const extra = state === "visible" ? "display: block !important; visibility: visible !important;" : "display: block !important; visibility: hidden !important; pointer-events: none !important;";
+        rules.push(place(selector, slot, extra));
+      }
+      if (columns || !chatVisible) {
+        rules.push("#chat-select { display: none !important; }");
+        rules.push("#mlpp-resizer { display: none !important; }");
+      } else {
+        const panel = layout.chats[0];
+        rules.push("#chat-select { display: block !important; }");
+        if (panel) {
+          const w = Math.max(40, panel.w - 8);
+          rules.push(`#chat-select { left: ${panel.x + 4}px !important; top: 4px !important; width: ${w}px !important; }`);
+        }
+        if (layout.resizer) rules.push(place("#mlpp-resizer", layout.resizer, "display: block !important;"));
+      }
+      rules.push(`#chat-toggle .open { display: ${chatVisible ? "none" : "inline"} !important; }`);
+      rules.push(`#chat-toggle .close { display: ${chatVisible ? "inline" : "none"} !important; }`);
+      setStyle("layout", rules.join("\n"));
     }
+    function schedule() {
+      if (timer) return;
+      timer = setTimeout(render, 0);
+    }
+    document.addEventListener(
+      "change",
+      (e) => {
+        if (e.target !== hooks.chatSelect) return;
+        e.stopPropagation();
+        if (hooks.chatSelect.value === "about:blank") {
+          chatVisible = false;
+          if (active >= 0) hooks.chatSelect.selectedIndex = active;
+        } else {
+          active = hooks.chatSelect.selectedIndex;
+          chatVisible = true;
+        }
+        schedule();
+      },
+      true
+    );
+    document.addEventListener(
+      "click",
+      (e) => {
+        if (!(e.target instanceof Node) || !hooks.chatToggle.contains(e.target)) return;
+        e.stopPropagation();
+        e.preventDefault();
+        chatVisible = !chatVisible;
+        schedule();
+      },
+      true
+    );
     let shield = null;
-    function addShield() {
-      shield = document.createElement("div");
-      shield.style.position = "fixed";
-      shield.style.inset = "0";
-      shield.style.zIndex = "2147483646";
-      shield.style.cursor = "col-resize";
-      document.body.append(shield);
-    }
-    function removeShield() {
-      shield?.remove();
-      shield = null;
-    }
     function onMove(e) {
-      setWidth(window.innerWidth - e.clientX - RESIZER_WIDTH / 2);
+      dragWidth = window.innerWidth - e.clientX - RESIZER_WIDTH / 2;
+      schedule();
     }
     function endDrag() {
       document.removeEventListener("pointermove", onMove);
       document.removeEventListener("pointerup", endDrag);
       document.removeEventListener("pointercancel", endDrag);
       resizer.classList.remove("mlpp-dragging");
-      removeShield();
-      save("chatWidth", preferred);
+      shield?.remove();
+      shield = null;
+      if (dragWidth !== null) {
+        const committed = chatWidth();
+        dragWidth = null;
+        set("chatWidth", committed);
+      }
+      schedule();
     }
     resizer.addEventListener("pointerdown", (e) => {
       if (e.button !== 0) return;
@@ -335,27 +559,21 @@
       } catch {
       }
       resizer.classList.add("mlpp-dragging");
-      addShield();
+      shield = document.createElement("div");
+      shield.style.cssText = "position:fixed;inset:0;z-index:2147483646;cursor:col-resize";
+      document.body.append(shield);
       document.addEventListener("pointermove", onMove);
       document.addEventListener("pointerup", endDrag);
       document.addEventListener("pointercancel", endDrag);
     });
     resizer.addEventListener("dblclick", () => {
-      setWidth(DEFAULT_WIDTH);
-      save("chatWidth", preferred);
+      set("chatWidth", DEFAULT_CHAT_WIDTH);
+      schedule();
     });
-    new MutationObserver(paint).observe(hooks.chat, {
-      attributes: true,
-      attributeFilter: ["src"]
-    });
-    window.addEventListener("resize", repaint);
-    paint();
-    return {
-      reservedWidth: () => effective() + RESIZER_WIDTH,
-      schedule: (fn) => {
-        onChange = fn;
-      }
-    };
+    window.addEventListener("resize", schedule);
+    onChange(schedule);
+    render();
+    return { schedule, render };
   }
 
   // src/main.js
@@ -372,13 +590,17 @@
       warn("페이지 훅을 찾지 못해 아무것도 하지 않습니다.");
       return;
     }
-    const chat = setupChatResizer(hooks);
-    const layout = startLayout(hooks, chat.reservedWidth);
-    chat.schedule(layout.schedule);
+    init();
+    const chatsRoot = document.createElement("div");
+    chatsRoot.id = "mlpp-chats";
+    const chats = createChatManager(hooks, chatsRoot);
+    startLayout(hooks, chatsRoot, chats);
     log(`v${VERSION} booted`, {
       style: getStyleMode(),
-      players: hooks.players.map((f) => f.name),
-      chats: readChatOptions(hooks.chatSelect).map((c) => `${c.label}${c.disabled ? " [disabled]" : ""}`)
+      mode: layoutMode(),
+      players: hooks.players.length,
+      chats: chats.usable.length,
+      viewport: `${window.innerWidth}x${window.innerHeight}`
     });
   }
 })();
