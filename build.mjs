@@ -14,7 +14,7 @@ const options = {
   minify: false,
   charset: 'utf8',
   banner: { js: banner },
-  outfile: 'dist/mullive-plus.user.js',
+  outfile: 'dist/mullive-plusplus.user.js',
 };
 
 if (process.argv.includes('--watch')) {
@@ -23,5 +23,5 @@ if (process.argv.includes('--watch')) {
   console.log(`watching... (version ${version})`);
 } else {
   await esbuild.build(options);
-  console.log(`built dist/mullive-plus.user.js (version ${version})`);
+  console.log(`built dist/mullive-plusplus.user.js (version ${version})`);
 }

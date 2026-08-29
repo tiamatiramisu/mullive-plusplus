@@ -1,6 +1,6 @@
-# mullive-plus STATUS
+# mullive-plusplus STATUS
 
-현재 버전: `v0.1.0` / GitHub: `tiamatiramisu/mullive-plus` / Greasy Fork: (미등록)
+현재 버전: `v0.1.0` / GitHub: `tiamatiramisu/mullive-plusplus` / Greasy Fork: (미등록)
 
 ## 스테이지
 
@@ -17,7 +17,7 @@ Stage 1(업스트림 분석)은 `SPEC.md`로 완료.
 - [x] esbuild 번들 + `meta.js` 배너 · 태그→`@version` 주입
 - [x] `jsconfig.json` checkJs 타입체크
 - [x] GitHub repo 생성 · SSH 원격 · 최초 push
-- [x] 태그 릴리스 워크플로우 (`v0.1.0` 성공, 에셋 `mullive-plus.user.js` 5617 B)
+- [x] 태그 릴리스 워크플로우 (`v0.1.0` 성공, 에셋 `mullive-plusplus.user.js` 5617 B)
 - [x] Greasy Fork `release` 웹훅 등록 (hook id `671923702`, ping → 200 OK)
 - [x] 페이지 훅 표 실사이트 검증
 - [x] CSP 주입 경로 실측 → `style.js` 판정 로직 수정
@@ -27,9 +27,9 @@ Stage 1(업스트림 분석)은 `SPEC.md`로 완료.
 ## 다음 할 일
 
 1. Greasy Fork에 스크립트 등록, 동기화 URL:
-   `https://github.com/tiamatiramisu/mullive-plus/releases/latest/download/mullive-plus.user.js`
-2. Violentmonkey에 `dist/mullive-plus.user.js`를 로컬 파일 추적으로 설치 → 스모크 테스트
-   (콘솔 `[mullive-plus] v… booted`, `style` 모드값, `#chat-container` 초록 외곽선)
+   `https://github.com/tiamatiramisu/mullive-plusplus/releases/latest/download/mullive-plusplus.user.js`
+2. Violentmonkey에 `dist/mullive-plusplus.user.js`를 로컬 파일 추적으로 설치 → 스모크 테스트
+   (콘솔 `[mullive-plusplus] v… booted`, `style` 모드값, `#chat-container` 초록 외곽선)
 3. Stage 2 착수
 
 ## 알려진 이슈
@@ -43,7 +43,7 @@ Stage 1(업스트림 분석)은 `SPEC.md`로 완료.
 ### 2026-08-29 — Stage 0
 
 **릴리스 파이프라인** — `v0.1.0` 태그 push → Actions 성공 → 릴리스 에셋 생성.
-`https://github.com/tiamatiramisu/mullive-plus/releases/latest/download/mullive-plus.user.js`
+`https://github.com/tiamatiramisu/mullive-plusplus/releases/latest/download/mullive-plusplus.user.js`
 → HTTP 200, 배포된 파일의 `@version` = `0.1.0` (태그값 주입 확인).
 웹훅 ping 배달 → Greasy Fork `200 OK`.
 

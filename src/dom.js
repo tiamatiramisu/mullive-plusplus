@@ -3,7 +3,7 @@
  * 사이트가 바뀌어 훅이 사라지면 여기서만 실패하고, 스크립트는 조용히 no-op 한다.
  */
 
-const TAG = '[mullive-plus]';
+const TAG = '[mullive-plusplus]';
 
 /**
  * @typedef {object} Hooks

@@ -1,4 +1,4 @@
-# mullive-plus SPEC
+# mullive-plusplus SPEC
 
 Mul.Live(https://mul.live)에 얹는 유저스크립트. 사이트를 포크하지 않고 기존 페이지를 강화한다.
 
