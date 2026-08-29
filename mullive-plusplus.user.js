@@ -4,7 +4,7 @@
 // @name:en      Mul.Live Multiview Enhancer
 // @name:ja-JP   Mul.Live マルチビュー強化
 // @namespace    http://tampermonkey.net/
-// @version      0.3.0
+// @version      0.3.1
 // @license      MIT
 // @description       Resizable chat panel, background-persistent chats, smarter video grid layout and drag-to-swap tiles for Mul.Live.
 // @description:en    Resizable chat panel, background-persistent chats, smarter video grid layout and drag-to-swap tiles for Mul.Live.
@@ -253,7 +253,7 @@
   }
 
   // src/chats.js
-  function createChatManager(hooks, root) {
+  function createChatManager(hooks, root, canCreate) {
     const options = readChatOptions(hooks.chatSelect);
     const frames = /* @__PURE__ */ new Map();
     const lastShown = /* @__PURE__ */ new Map();
@@ -263,6 +263,7 @@
       if (existing) return existing;
       const option = options[index];
       if (!option || option.disabled) return null;
+      if (!canCreate(index)) return null;
       const frame = document.createElement("iframe");
       frame.id = `mlpp-chat-${index}`;
       frame.setAttribute("frameborder", "0");
@@ -576,8 +577,58 @@
     return { schedule, render };
   }
 
+  // src/ready.js
+  var SOOP_ORIGIN = /^https:\/\/play\.sooplive\.(com|co\.kr)$/;
+  var SETTLE_MS = 2e3;
+  var GIVE_UP_MS = 15e3;
+  var ready = /* @__PURE__ */ new Set();
+  var listeners2 = /* @__PURE__ */ new Set();
+  var gaveUp = false;
+  function notify() {
+    listeners2.forEach((fn) => fn());
+  }
+  function markReady(source) {
+    if (ready.has(source)) return;
+    ready.add(source);
+    notify();
+  }
+  function watchPlayers() {
+    window.addEventListener("message", (e) => {
+      if (!(e.source instanceof Window)) return;
+      if (!SOOP_ORIGIN.test(e.origin)) return;
+      const cmd = (
+        /** @type {{ cmd?: string } | null} */
+        e.data?.cmd
+      );
+      if (cmd === "PupdateBroadInfo") {
+        markReady(e.source);
+      } else if (cmd === "PonReady") {
+        const source = e.source;
+        setTimeout(() => markReady(source), SETTLE_MS);
+      }
+    });
+    setTimeout(() => {
+      if (gaveUp) return;
+      gaveUp = true;
+      notify();
+    }, GIVE_UP_MS);
+  }
+  function isPlayerReady(player) {
+    if (gaveUp) return true;
+    const win = player?.contentWindow;
+    return win ? ready.has(win) : false;
+  }
+  function timedOut() {
+    return gaveUp;
+  }
+  function onPlayerReady(fn) {
+    listeners2.add(fn);
+  }
+
   // src/main.js
   var VERSION = typeof GM_info !== "undefined" ? GM_info.script.version : "dev";
+  var SOOP_CHAT = /^https:\/\/play\.sooplive\.(com|co\.kr)\//;
+  watchPlayers();
   var cspReports = 0;
   document.addEventListener("securitypolicyviolation", (e) => {
     if (++cspReports > 3) return;
@@ -591,10 +642,20 @@
       return;
     }
     init();
+    const options = readChatOptions(hooks.chatSelect);
+    const canCreate = (index) => {
+      const url = options[index]?.url ?? "";
+      if (!SOOP_CHAT.test(url)) return true;
+      return isPlayerReady(hooks.players[index]);
+    };
     const chatsRoot = document.createElement("div");
     chatsRoot.id = "mlpp-chats";
-    const chats = createChatManager(hooks, chatsRoot);
-    startLayout(hooks, chatsRoot, chats);
+    const chats = createChatManager(hooks, chatsRoot, canCreate);
+    const layout = startLayout(hooks, chatsRoot, chats);
+    onPlayerReady(() => {
+      if (timedOut()) warn("플레이어 준비 신호를 받지 못해 채팅을 그대로 만듭니다.");
+      layout.schedule();
+    });
     log(`v${VERSION} booted`, {
       style: getStyleMode(),
       mode: layoutMode(),
