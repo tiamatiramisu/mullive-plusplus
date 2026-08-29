@@ -4,7 +4,7 @@
 // @name:en      Mul.Live Multiview Enhancer
 // @name:ja-JP   Mul.Live マルチビュー強化
 // @namespace    http://tampermonkey.net/
-// @version      0.4.0
+// @version      0.5.0
 // @license      MIT
 // @description       Resizable chat panel, background-persistent chats, smarter video grid layout and drag-to-swap tiles for Mul.Live.
 // @description:en    Resizable chat panel, background-persistent chats, smarter video grid layout and drag-to-swap tiles for Mul.Live.
@@ -188,7 +188,23 @@
       max: 1200
     },
     chatWidth: { name: "사이드 채팅 폭 (px)", title: "리사이저를 끌어도 바뀐다.", type: "int", value: 350, min: 240, max: 1600 },
-    tileGap: { name: "타일 간격 (px)", type: "int", value: 4, min: 0, max: 40 },
+    tileGap: { name: "타일 간격 (px)", title: "영상·채팅 사이의 여백. 0이면 딱 붙는다.", type: "int", value: 0, min: 0, max: 40 },
+    gridCols: {
+      name: "수동 격자 — 열 수 (0 = 자동)",
+      title: "0이 아니면 영상을 이 열 수로 배치한다. 수동 격자를 쓰면 열 모드(영상 아래 채팅)는 적용되지 않고 사이드 채팅이 된다.",
+      type: "int",
+      value: 0,
+      min: 0,
+      max: 12
+    },
+    gridRows: {
+      name: "수동 격자 — 행 수 (0 = 자동)",
+      title: "방송 수에 필요한 행보다 크면 빈 칸이 남는다. 모자라면 필요한 만큼 늘어난다.",
+      type: "int",
+      value: 0,
+      min: 0,
+      max: 12
+    },
     chatStagger: {
       name: "채팅 생성 간격 (ms)",
       title: "채팅을 한꺼번에 띄우면 플레이어들이 동시에 재생을 시작하는 시점과 겹쳐 로딩이 실패할 수 있다. 하나씩 이 간격을 두고 만든다.",
@@ -398,22 +414,25 @@
   // src/geometry.js
   var ASPECT = 16 / 9;
   var MIN_CHAT_HEIGHT = 160;
+  function gridWith(cols, rows, availW, availH, gap) {
+    if (cols <= 0 || rows <= 0 || availW <= 0 || availH <= 0) return null;
+    const cellW = Math.floor((availW - gap * (cols - 1)) / cols);
+    const cellH = Math.floor((availH - gap * (rows - 1)) / rows);
+    if (cellW <= 0 || cellH <= 0) return null;
+    let w = cellW;
+    let h = Math.floor(cellW / ASPECT);
+    if (h > cellH) {
+      h = cellH;
+      w = Math.floor(cellH * ASPECT);
+    }
+    return w > 0 && h > 0 ? { cols, rows, w, h } : null;
+  }
   function computeGrid(n, availW, availH, gap) {
-    if (n <= 0 || availW <= 0 || availH <= 0) return null;
+    if (n <= 0) return null;
     let best = null;
     for (let cols = 1; cols <= n; cols++) {
-      const rows = Math.ceil(n / cols);
-      const cellW = Math.floor((availW - gap * (cols - 1)) / cols);
-      const cellH = Math.floor((availH - gap * (rows - 1)) / rows);
-      if (cellW <= 0 || cellH <= 0) continue;
-      let w = cellW;
-      let h = Math.floor(cellW / ASPECT);
-      if (h > cellH) {
-        h = cellH;
-        w = Math.floor(cellH * ASPECT);
-      }
-      if (w <= 0 || h <= 0) continue;
-      if (!best || w > best.w) best = { cols, rows, w, h };
+      const grid = gridWith(cols, Math.ceil(n / cols), availW, availH, gap);
+      if (grid && (!best || grid.w > best.w)) best = grid;
     }
     return best;
   }
@@ -436,10 +455,10 @@
     }
     return { mode: "columns", videos, chats, resizer: null };
   }
-  function sideLayout(n, W, H, gap, chatWidth, resizerWidth, chatVisible) {
+  function sideLayout(n, W, H, gap, chatWidth, resizerWidth, chatVisible, forceCols = 0, forceRows = 0) {
     const reserved = chatVisible ? chatWidth + resizerWidth : 0;
     const availW = W - reserved;
-    const grid = computeGrid(n, availW, H, gap);
+    const grid = forceCols > 0 ? gridWith(forceCols, Math.max(forceRows, Math.ceil(n / forceCols)), availW, H, gap) : computeGrid(n, availW, H, gap);
     const videos = [];
     if (grid) {
       const totalH = grid.rows * grid.h + gap * (grid.rows - 1);
@@ -662,16 +681,32 @@ html.mlpp-swap .mlpp-tile:hover { border-color: #7aa2f7 !important; }
   margin: 0 !important;
   pointer-events: auto !important;
 }
+/* 잡는 영역은 세로 전체로 넓게 두되, 보이는 것은 가운데의 짧은 그립뿐이다.
+   막대를 세로로 길게 그리면 영상과 채팅 사이에 경계선이 생겨 눈에 거슬린다. */
 #mlpp-resizer {
   position: absolute !important;
   z-index: 4 !important;
-  background-color: #222 !important;
-  border-left: 1px solid #3a3a3a !important;
+  background-color: transparent !important;
+  border: 0 !important;
   cursor: col-resize !important;
   pointer-events: auto !important;
-  transition: background-color 120ms ease-in-out !important;
 }
-#mlpp-resizer:hover, #mlpp-resizer.mlpp-dragging { background-color: #555 !important; }
+#mlpp-resizer::after {
+  content: '' !important;
+  position: absolute !important;
+  left: 1px !important;
+  right: 1px !important;
+  top: 50% !important;
+  height: 56px !important;
+  transform: translateY(-50%) !important;
+  border-radius: 2px !important;
+  background-color: rgba(255, 255, 255, 0.1) !important;
+  transition: background-color 120ms ease-in-out, height 120ms ease-in-out !important;
+}
+#mlpp-resizer:hover::after, #mlpp-resizer.mlpp-dragging::after {
+  height: 80px !important;
+  background-color: rgba(255, 255, 255, 0.4) !important;
+}
 `;
   function place(selector, r, extra = "") {
     return `${selector} { left: ${r.x}px !important; top: ${r.y}px !important; width: ${r.w}px !important; height: ${r.h}px !important; ${extra} }`;
@@ -724,11 +759,15 @@ html.mlpp-swap .mlpp-tile:hover { border-color: #7aa2f7 !important; }
       const gap = get("tileGap");
       const mode2 = layoutMode();
       const cw = chatWidth();
+      const forceCols = get("gridCols");
+      const forceRows = get("gridRows");
       let layout = null;
-      if (chatVisible && mode2 !== "side") {
+      if (chatVisible && forceCols <= 0 && mode2 !== "side") {
         layout = columnLayout(n, W, H, gap, get("minColumnWidth"), mode2 === "columns");
       }
-      if (!layout) layout = sideLayout(n, W, H, gap, cw, RESIZER_WIDTH, chatVisible);
+      if (!layout) {
+        layout = sideLayout(n, W, H, gap, cw, RESIZER_WIDTH, chatVisible, forceCols, forceRows);
+      }
       const columns = layout.mode === "columns";
       const parked = { x: W - cw, y: SELECT_HEIGHT, w: cw, h: Math.max(1, H - SELECT_HEIGHT) };
       const visible = columns ? chats.usable : chatVisible && active >= 0 ? [active] : [];
