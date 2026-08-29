@@ -16,7 +16,7 @@
  * 요소의 존재만으로는 성공을 판별할 수 없다. 센티넬 커스텀 속성으로 확인한다.
  */
 
-const SENTINEL = 'html { --mlp-style-ok: 1; }';
+const SENTINEL = 'html { --mlpp-style-ok: 1; }';
 
 /** @type {Map<string, string>} */
 const blocks = new Map();
@@ -41,7 +41,7 @@ function css() {
 
 /** 센티넬 규칙이 실제로 계산된 스타일에 반영됐는지 확인한다. */
 function isApplied() {
-  return getComputedStyle(document.documentElement).getPropertyValue('--mlp-style-ok').trim() === '1';
+  return getComputedStyle(document.documentElement).getPropertyValue('--mlpp-style-ok').trim() === '1';
 }
 
 /** 이전 시도의 잔재를 걷어낸다. 단계가 겹쳐 쌓이지 않게 한다. */
