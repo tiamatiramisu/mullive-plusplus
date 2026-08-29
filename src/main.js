@@ -2,7 +2,7 @@
 import { waitForHooks, readChatOptions, log, warn } from './dom.js';
 import { setStyle, getStyleMode } from './style.js';
 
-const VERSION = GM_info?.script?.version ?? 'unknown';
+const VERSION = typeof GM_info !== 'undefined' ? GM_info.script.version : 'dev';
 
 // 우리 주입이 CSP에 걸리는지 관측한다. 페이지 자신도 이 이벤트를 쓰므로(네이버 로그인) 겹치지 않게 로그만 남긴다.
 document.addEventListener('securitypolicyviolation', (e) => {

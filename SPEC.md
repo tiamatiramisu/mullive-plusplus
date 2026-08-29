@@ -36,9 +36,17 @@ Mul.Live(https://mul.live)에 얹는 유저스크립트. 사이트를 포크하�
 
 ## 제약 (설계를 강제하는 사실)
 
-1. **CSP**: `script-src 'nonce-…'; style-src 'nonce-…'`, `unsafe-inline` 없음.
+1. **CSP**: `script-src 'nonce-…'; style-src 'nonce-…'`, `unsafe-inline` 없음. HTTP 헤더로만 전달된다(meta 태그 없음).
    → `@grant none`이면 주입 자체가 차단된다. GM API를 최소 1개 grant해 샌드박스 컨텍스트로 실행해야 한다.
    → 스타일 주입은 `src/style.js`의 3단 폴백(GM_addStyle → adoptedStyleSheets → `<style>`)을 통한다.
+
+   **2026-08-29 실측** (페이지 컨텍스트에서 직접 확인):
+   - `<style>` 요소 삽입 → **차단됨**. `style-src-elem` 위반 이벤트 발생, 스타일 미적용.
+   - `document.adoptedStyleSheets` + `CSSStyleSheet.replaceSync` → **통과**. 위반 없이 정상 적용.
+
+   CSP에 막힌 `<style>` 요소도 DOM에 남아 `isConnected === true`이므로, 주입 성공 여부는
+   **요소의 존재가 아니라 효과로 판정해야 한다.** `style.js`는 센티넬 커스텀 속성(`--mlp-style-ok`)이
+   계산된 스타일에 반영됐는지로 각 단계를 검증한다.
 2. **iframe을 DOM에서 옮기면 리로드된다.** 타일 위치 교환은 DOM 이동 없이 CSS 좌표만 바꾼다.
 3. 페이지 `adjustLayout()`은 **인라인 style**을 쓴다. 우리 규칙은 전부 `!important`로 준다. 메인 월드 접근이나 함수 패치는 불필요.
 4. 새 iframe은 페이지 `frame-src` 화이트리스트 안이어야 한다.
