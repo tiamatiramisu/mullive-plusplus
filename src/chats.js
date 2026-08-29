@@ -14,8 +14,9 @@ import { readChatOptions } from './dom.js';
 /**
  * @param {import('./dom.js').Hooks} hooks
  * @param {HTMLElement} root
+ * @param {(index: number) => boolean} canCreate 지금 이 채팅을 만들어도 되는지
  */
-export function createChatManager(hooks, root) {
+export function createChatManager(hooks, root, canCreate) {
   const options = readChatOptions(hooks.chatSelect);
   /** @type {Map<number, HTMLIFrameElement>} */
   const frames = new Map();
@@ -31,6 +32,8 @@ export function createChatManager(hooks, root) {
     if (existing) return existing;
     const option = options[index];
     if (!option || option.disabled) return null;
+    // 플레이어가 준비되기 전에 만들면 채팅이 방에 입장하지 못한다. ready.js 참고.
+    if (!canCreate(index)) return null;
 
     const frame = document.createElement('iframe');
     frame.id = `mlpp-chat-${index}`;
