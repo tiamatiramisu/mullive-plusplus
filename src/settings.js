@@ -102,6 +102,43 @@ export function layoutMode() {
   return LAYOUT_MODES[raw('layoutMode')] ?? 'auto';
 }
 
+/** @type {Map<string, number[]>} */
+const orderMemory = new Map();
+
+/**
+ * 슬롯 → 스트림 대응을 불러온다. GM_config가 아니라 GM 저장소에 직접 둔다(설정 UI에 노출할 값이 아니다).
+ * 저장된 값이 지금 방송 구성과 맞지 않으면 기본 순서로 돌아간다.
+ * @param {string} key
+ * @param {number} n
+ * @returns {number[]}
+ */
+export function loadOrder(key, n) {
+  const identity = Array.from({ length: n }, (_, i) => i);
+  /** @type {unknown} */
+  let stored = orderMemory.get(key) ?? null;
+  try {
+    if (typeof GM_getValue === 'function') stored = GM_getValue(key, stored);
+  } catch {
+    /* 메모리 값으로 진행 */
+  }
+  if (!Array.isArray(stored) || stored.length !== n) return identity;
+  const ok = stored.every((v) => Number.isInteger(v) && v >= 0 && v < n) && new Set(stored).size === n;
+  return ok ? /** @type {number[]} */ (stored) : identity;
+}
+
+/**
+ * @param {string} key
+ * @param {number[]} value
+ */
+export function saveOrder(key, value) {
+  orderMemory.set(key, value);
+  try {
+    if (typeof GM_setValue === 'function') GM_setValue(key, value);
+  } catch {
+    /* 메모리에만 남는다 */
+  }
+}
+
 /**
  * @param {string} key
  * @param {number} value

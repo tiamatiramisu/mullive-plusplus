@@ -1,6 +1,7 @@
 import { setStyle } from './style.js';
 import * as settings from './settings.js';
 import { columnLayout, sideLayout } from './geometry.js';
+import { createDragSwap } from './dnd.js';
 
 /**
  * 배치 적용과 사용자 조작.
@@ -103,6 +104,28 @@ export function startLayout(hooks, chatsRoot, chats) {
   let timer = 0;
   let chatVisible = true;
   let active = chats.firstUsable();
+
+  // 슬롯(화면상의 자리) → 스트림(방송) 대응. 드래그 교환으로만 바뀐다.
+  // iframe을 옮기지 않고 이 대응만 바꾸므로 교환해도 재생이 끊기지 않는다.
+  const orderKey = `order:${location.pathname}`;
+  let order = settings.loadOrder(orderKey, hooks.players.length);
+
+  const dnd = createDragSwap({
+    root: chatsRoot,
+    labelOf: (slot) => hooks.chatSelect.options[order[slot]]?.textContent ?? '',
+    swap: (a, b) => {
+      [order[a], order[b]] = [order[b], order[a]];
+      settings.saveOrder(orderKey, order);
+    },
+    schedule: () => schedule(),
+  });
+
+  /** 드래그 교환 순서를 기본으로 되돌린다. */
+  function resetOrder() {
+    order = hooks.players.map((_, i) => i);
+    settings.saveOrder(orderKey, order);
+    schedule();
+  }
   /** 드래그 중에만 쓰는 임시 폭. 놓을 때 설정에 커밋한다. */
   let dragWidth = /** @type {number | null} */ (null);
 
@@ -140,14 +163,14 @@ export function startLayout(hooks, chatsRoot, chats) {
 
     const visible = columns ? chats.usable : chatVisible && active >= 0 ? [active] : [];
 
-    // 지금 화면에 자리를 가진 채팅과 그 사각형
+    // 지금 화면에 자리를 가진 채팅과 그 사각형. 열 모드에서는 채팅이 자기 영상을 따라간다.
     /** @type {Map<number, import('./geometry.js').Rect>} */
     const slots = new Map();
     if (columns) {
-      for (const i of visible) {
-        const r = layout.chats[i];
-        if (r) slots.set(i, r);
-      }
+      layout.chats.forEach((r, slot) => {
+        const stream = order[slot];
+        if (visible.includes(stream)) slots.set(stream, r);
+      });
     } else if (visible.length > 0 && layout.chats[0]) {
       slots.set(visible[0], layout.chats[0]);
     }
@@ -156,7 +179,10 @@ export function startLayout(hooks, chatsRoot, chats) {
 
     const rules = [BASE_CSS];
 
-    layout.videos.forEach((r, i) => rules.push(place(`#streams iframe:nth-child(${i + 1})`, r)));
+    // 슬롯 순서대로 좌표를 나눠준다. DOM 순서(=방송 순서)와 화면 자리는 별개다.
+    layout.videos.forEach((r, slot) => {
+      rules.push(place(`#streams iframe:nth-child(${order[slot] + 1})`, r));
+    });
 
     // 채팅 페이지는 무거워서 로딩이 길다. 그동안 검은 화면만 보이면 고장인지 로딩인지 알 수 없다.
     for (const [index, slot] of slots) {
@@ -202,6 +228,7 @@ export function startLayout(hooks, chatsRoot, chats) {
     rules.push(`#chat-toggle .close { display: ${chatVisible ? 'inline' : 'none'} !important; }`);
 
     setStyle('layout', rules.join('\n'));
+    dnd.update(layout.videos);
   }
 
   // requestAnimationFrame을 쓰지 않는다. 배경 탭에서는 rAF가 발화하지 않아 재계산이 밀린다.
@@ -295,5 +322,5 @@ export function startLayout(hooks, chatsRoot, chats) {
   chats.onFrameLoad(schedule);
 
   render();
-  return { schedule, render };
+  return { schedule, render, resetOrder, swapHint: dnd.hint };
 }

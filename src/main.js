@@ -1,4 +1,4 @@
-/* global GM_info */
+/* global GM_info, GM_registerMenuCommand */
 import { waitForHooks, readChatOptions, log, warn } from './dom.js';
 import { getStyleMode } from './style.js';
 import * as settings from './settings.js';
@@ -55,7 +55,12 @@ async function main() {
     layout.schedule();
   });
 
+  if (typeof GM_registerMenuCommand === 'function') {
+    GM_registerMenuCommand('영상 순서 초기화', () => layout.resetOrder());
+  }
+
   log(`v${VERSION} booted`, {
+    swap: layout.swapHint,
     style: getStyleMode(),
     mode: settings.layoutMode(),
     players: hooks.players.length,
