@@ -138,3 +138,22 @@ GM_addStyle 경로도 스타일 자체는 적용되지만(차단이 아니라 �
 | 더블클릭 리셋 | 350px / 602×338 |
 | 오버플로우 | 전 구간 scrollWidth = 뷰포트(960) |
 | 타일 배치 | `1,218` `1,560` `1,902` — 338×3+8=1022가 1458에 정확히 수직 중앙 정렬 |
+
+### 2026-08-29 — Greasy Fork 릴리스 웹훅이 동작하지 않던 원인
+
+`v0.2.0` 릴리스 후 웹훅은 200으로 배달됐으나 Greasy Fork는 `0.1.0`에 머물렀다.
+배달 응답 본문:
+
+```
+Could not pull contents from git: fatal: path 'mullive-plusplus.user.js' does not exist in 'v0.2.0'
+```
+
+greasyfork `lib/github.rb`의 `info_from_release_event` → `file_from_root_for_url`은
+동기화 URL `.../releases/latest/download/mullive-plusplus.user.js` 에서 `latest/`와 `download/`를
+떼어내 **저장소 루트 기준 경로** `mullive-plusplus.user.js` 를 만들고,
+`process_webhook_changes`가 `Git.get_contents(repo_url, { 그 경로 => 태그 })`로 꺼낸다.
+**릴리스 에셋은 읽지 않는다.** 도움말의 "에셋" 설명은 최초 가져오기·주기적 동기화(HTTP 페치)에만 해당한다.
+
+대응: 빌드 산출물을 저장소 루트에 커밋하고, 그 커밋에 태그를 단다(`release.mjs`).
+워크플로우는 소스에서 다시 빌드해 커밋된 산출물과 `diff`로 대조하므로,
+산출물을 갱신하지 않고 태그만 밀면 릴리스가 실패한다.
