@@ -1,13 +1,13 @@
 /* global GM_info */
-import { waitForHooks, readChatOptions, log, warn } from './dom.js';
+import { waitForHooks, log, warn } from './dom.js';
 import { getStyleMode } from './style.js';
-import { setupChatResizer } from './chat.js';
+import * as settings from './settings.js';
+import { createChatManager } from './chats.js';
 import { startLayout } from './layout.js';
 
 const VERSION = typeof GM_info !== 'undefined' ? GM_info.script.version : 'dev';
 
-// 우리 주입이 CSP에 걸리는지 관측한다. 페이지 자신도 이 이벤트를 쓰므로(네이버 로그인) 로그만 남긴다.
-// 위반이 반복되는 경로가 있어 몇 건만 남기고 멈춘다.
+// 우리 주입이 CSP에 걸리는지 관측한다. 반복되는 경로가 있어 몇 건만 남기고 멈춘다.
 let cspReports = 0;
 document.addEventListener('securitypolicyviolation', (e) => {
   if (++cspReports > 3) return;
@@ -24,13 +24,18 @@ async function main() {
     return;
   }
 
-  const chat = setupChatResizer(hooks);
-  const layout = startLayout(hooks, chat.reservedWidth);
-  chat.schedule(layout.schedule);
+  settings.init();
+
+  const chatsRoot = document.createElement('div');
+  chatsRoot.id = 'mlpp-chats';
+  const chats = createChatManager(hooks, chatsRoot);
+  startLayout(hooks, chatsRoot, chats);
 
   log(`v${VERSION} booted`, {
     style: getStyleMode(),
-    players: hooks.players.map((f) => f.name),
-    chats: readChatOptions(hooks.chatSelect).map((c) => `${c.label}${c.disabled ? ' [disabled]' : ''}`),
+    mode: settings.layoutMode(),
+    players: hooks.players.length,
+    chats: chats.usable.length,
+    viewport: `${window.innerWidth}x${window.innerHeight}`,
   });
 }

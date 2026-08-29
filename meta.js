@@ -21,4 +21,5 @@
 // @grant        GM_registerMenuCommand
 // @grant        GM_unregisterMenuCommand
 // @grant        GM_addValueChangeListener
+// @require      https://github.com/PRO-2684/GM_config/releases/download/v1.2.2/config.js#md5=fca1967de605996e44d14d2eab403706
 // ==/UserScript==
