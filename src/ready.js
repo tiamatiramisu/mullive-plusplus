@@ -8,17 +8,26 @@
  * (페이지 원본이 PonReady를 받은 뒤에야 #chat의 src를 채우는 것도 같은 이유다.)
  *
  * 신호는 두 가지를 받는다.
- * - PupdateBroadInfo: 방송 정보가 실제로 도착했다는 뜻이라 가장 확실하다.
- * - PonReady: 페이지가 이 시점에 Pload를 보낸다. 플레이어가 그걸 처리할 여유를 두고 준비로 친다.
+ * - PonReady: 플레이어 앱이 초기화됐다는 뜻. 페이지 원본도 이 시점에 지연 없이 #chat의 src를 채우고
+ *   그것이 잘 동작하므로, 여기에 여유 시간을 더 두지 않는다. 채팅 로딩이 그만큼 늦어질 뿐이다.
+ * - PupdateBroadInfo: 방송 정보 도착. 더 늦게 오지만 확실하다.
  */
 
 const SOOP_ORIGIN = /^https:\/\/play\.sooplive\.(com|co\.kr)$/;
-/** PonReady만 받았을 때 준비로 치기까지 기다리는 시간 */
-const SETTLE_MS = 2000;
+/**
+ * PonReady 후 준비로 치기까지의 여유.
+ * 페이지가 이 신호에 대한 응답으로 Pload를 보내고 플레이어가 그것을 처리해야 하므로 0은 이르다.
+ * 실측에서 PonReady 직후(약 700ms)에 만든 채팅 3개 중 1개만 입장했다.
+ */
+const SETTLE_MS = 500;
 /** 신호가 끝내 오지 않아도 이 시간이 지나면 포기하고 채팅을 만든다. */
-const GIVE_UP_MS = 15000;
+const GIVE_UP_MS = 10000;
 
-/** @type {Set<Window>} */
+/**
+ * 교차 출처 프레임의 window는 `instanceof Window`가 false다(프로토타입 체인이 막혀 있다).
+ * 반면 `===` 비교와 Set 멤버십은 정상 동작한다. 페이지 원본도 `e.source === f.contentWindow`로 비교한다.
+ * @type {Set<MessageEventSource>}
+ */
 const ready = new Set();
 /** @type {Set<() => void>} */
 const listeners = new Set();
@@ -28,7 +37,7 @@ function notify() {
   listeners.forEach((fn) => fn());
 }
 
-/** @param {Window} source */
+/** @param {MessageEventSource} source */
 function markReady(source) {
   if (ready.has(source)) return;
   ready.add(source);
@@ -38,14 +47,15 @@ function markReady(source) {
 /** 스크립트 부팅 직후 호출한다. 훅을 찾기 전에 신호가 올 수 있어 최대한 일찍 걸어야 한다. */
 export function watchPlayers() {
   window.addEventListener('message', (e) => {
-    if (!(e.source instanceof Window)) return;
+    const source = e.source;
+    if (!source) return;
     if (!SOOP_ORIGIN.test(e.origin)) return;
     const cmd = /** @type {{ cmd?: string } | null} */ (e.data)?.cmd;
     if (cmd === 'PupdateBroadInfo') {
-      markReady(e.source);
+      markReady(source);
     } else if (cmd === 'PonReady') {
-      const source = e.source;
-      setTimeout(() => markReady(source), SETTLE_MS);
+      if (SETTLE_MS > 0) setTimeout(() => markReady(source), SETTLE_MS);
+      else markReady(source);
     }
   });
 

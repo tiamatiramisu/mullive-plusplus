@@ -56,9 +56,15 @@ Mul.Live(https://mul.live)에 얹는 유저스크립트. 사이트를 포크하�
    확장(`soop.js`)이 채팅 프레임에서 `window.opener = window.parent[플레이어이름]`으로 플레이어를 이어주고,
    채팅은 그 플레이어에게서 방송 정보를 받아 입장한다. 플레이어가 준비되기 전에 채팅 프레임을 만들면
    UI 껍데기만 뜨고 영영 입장하지 못한다. 페이지 원본이 `PonReady`를 받은 뒤에야 `#chat`의 src를 채우는 이유다.
-   → `src/ready.js`가 `PupdateBroadInfo`(확실) 또는 `PonReady` + 2초를 기다린 뒤 채팅을 만든다.
+   → `src/ready.js`가 `PupdateBroadInfo` 또는 `PonReady` + 0.5초를 기다린 뒤 채팅을 만든다.
    SOOP 외 플랫폼의 채팅은 플레이어와 무관하므로 기다리지 않는다.
-6. 페이지 리스너를 떼어낼 수 없다(함수 참조 접근 불가). `document`의 **캡처 단계**에서 `stopPropagation()`으로 선점한다.
+   `PonReady` 즉시(약 700ms)에 만들면 3개 중 1개만 입장한다. 페이지가 그 신호에 대한 응답으로
+   보내는 `Pload`를 플레이어가 처리할 시간이 필요하다.
+7. **채팅을 한꺼번에 띄우면 실패한다.** 플레이어들이 동시에 재생을 시작하는 시점과 겹친다.
+   → 생성 큐를 두고 `chatStagger`(기본 800ms) 간격으로 하나씩 만든다.
+8. **교차 출처 프레임의 window는 `instanceof Window`가 false다.** 프로토타입 체인이 막혀 있다.
+   `===` 비교와 `Set` 멤버십은 정상이므로 프레임 식별은 그쪽으로 한다.
+9. 페이지 리스너를 떼어낼 수 없다(함수 참조 접근 불가). `document`의 **캡처 단계**에서 `stopPropagation()`으로 선점한다.
    페이지 JS가 `#chat` 등의 참조를 들고 있으므로 해당 요소는 DOM에 남겨둔다.
 
 ## 레이아웃 모델
@@ -124,6 +130,7 @@ n개 열을 만들고 열마다 위에 영상, 아래에 그 방송의 채팅을
 | `minColumnWidth` | int | 400 | 열 모드 최소 열 폭 |
 | `chatWidth` | int | 350 | 사이드 채팅 폭. 리사이저로도 바뀐다 |
 | `tileGap` | int | 4 | 타일 간격 |
+| `chatStagger` | int | 800 | 채팅을 하나씩 만드는 간격(ms) |
 | `chatLimit` | int | 0 | 동시 유지 채팅 수. 0이면 무제한 |
 
 ## 스코프 제외

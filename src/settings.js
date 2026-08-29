@@ -26,6 +26,14 @@ const DESC = {
   },
   chatWidth: { name: '사이드 채팅 폭 (px)', title: '리사이저를 끌어도 바뀐다.', type: 'int', value: 350, min: 240, max: 1600 },
   tileGap: { name: '타일 간격 (px)', type: 'int', value: 4, min: 0, max: 40 },
+  chatStagger: {
+    name: '채팅 생성 간격 (ms)',
+    title: '채팅을 한꺼번에 띄우면 플레이어들이 동시에 재생을 시작하는 시점과 겹쳐 로딩이 실패할 수 있다. 하나씩 이 간격을 두고 만든다.',
+    type: 'int',
+    value: 800,
+    min: 0,
+    max: 5000,
+  },
   chatLimit: {
     name: '동시 유지 채팅 수 (0 = 무제한)',
     title: '유지 중인 채팅이 이 수를 넘으면 오래 안 본 것부터 렌더를 멈춘다. 연결은 유지되므로 다시 열면 즉시 보인다.',

@@ -40,9 +40,21 @@ const BASE_CSS = `
 }
 #mlpp-chats iframe {
   position: absolute !important;
+  z-index: 2 !important;
   border: 0 !important;
   background-color: #141517 !important;
   pointer-events: auto !important;
+}
+#mlpp-chats .mlpp-placeholder {
+  position: absolute !important;
+  z-index: 3 !important;
+  display: none !important;
+  align-items: center !important;
+  justify-content: center !important;
+  background-color: #141517 !important;
+  color: #8a8f98 !important;
+  font-size: 14px !important;
+  pointer-events: none !important;
 }
 #chat-select {
   position: absolute !important;
@@ -127,11 +139,31 @@ export function startLayout(hooks, chatsRoot, chats) {
     const parked = { x: W - cw, y: SELECT_HEIGHT, w: cw, h: Math.max(1, H - SELECT_HEIGHT) };
 
     const visible = columns ? chats.usable : chatVisible && active >= 0 ? [active] : [];
+
+    // 지금 화면에 자리를 가진 채팅과 그 사각형
+    /** @type {Map<number, import('./geometry.js').Rect>} */
+    const slots = new Map();
+    if (columns) {
+      for (const i of visible) {
+        const r = layout.chats[i];
+        if (r) slots.set(i, r);
+      }
+    } else if (visible.length > 0 && layout.chats[0]) {
+      slots.set(visible[0], layout.chats[0]);
+    }
+
     const states = chats.sync(visible, settings.get('chatLimit'));
 
     const rules = [BASE_CSS];
 
     layout.videos.forEach((r, i) => rules.push(place(`#streams iframe:nth-child(${i + 1})`, r)));
+
+    // 채팅 페이지는 무거워서 로딩이 길다. 그동안 검은 화면만 보이면 고장인지 로딩인지 알 수 없다.
+    for (const [index, slot] of slots) {
+      if (chats.isLoaded(index)) continue;
+      const ph = chats.ensurePlaceholder(index);
+      rules.push(place(`#${ph.id}`, slot, 'display: flex !important;'));
+    }
 
     for (const { index, state } of states) {
       const selector = `#mlpp-chat-${index}`;
@@ -141,7 +173,7 @@ export function startLayout(hooks, chatsRoot, chats) {
       }
       let slot = parked;
       if (state === 'visible') {
-        const found = columns ? layout.chats[index] : layout.chats[0];
+        const found = slots.get(index);
         if (!found) continue;
         slot = found;
       }
@@ -259,6 +291,8 @@ export function startLayout(hooks, chatsRoot, chats) {
 
   window.addEventListener('resize', schedule);
   settings.onChange(schedule);
+  // 프레임이 로드되면 자리 표시자를 걷는다.
+  chats.onFrameLoad(schedule);
 
   render();
   return { schedule, render };
