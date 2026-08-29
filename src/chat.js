@@ -29,7 +29,12 @@ function clampWidth(w) {
  * @returns {{ reservedWidth: () => number, schedule: (fn: () => void) => void }}
  */
 export function setupChatResizer(hooks) {
-  let width = clampWidth(load('chatWidth', DEFAULT_WIDTH));
+  // 사용자가 고른 값. 창 크기 때문에 절대 덮어쓰지 않는다.
+  // 클램프를 이 값에 직접 적용하면, 창이 좁은 순간에 로드됐을 때 하한으로 눌린 뒤
+  // 창을 넓혀도 원래 폭이 복구되지 않는다.
+  let preferred = Number(load('chatWidth', DEFAULT_WIDTH)) || DEFAULT_WIDTH;
+  /** 실제로 적용되는 폭. 현재 창 크기에 맞춰 매번 다시 계산한다. */
+  const effective = () => clampWidth(preferred);
   /** @type {(() => void) | null} */
   let onChange = null;
 
@@ -41,6 +46,7 @@ export function setupChatResizer(hooks) {
 
   function paint() {
     const visible = isChatVisible(hooks);
+    const width = effective();
     setStyle(
       'chat',
       `#chat-container {
@@ -66,8 +72,14 @@ export function setupChatResizer(hooks) {
   /** @param {number} next */
   function setWidth(next) {
     const w = clampWidth(next);
-    if (w === width) return;
-    width = w;
+    if (w === preferred) return;
+    preferred = w;
+    paint();
+    onChange?.();
+  }
+
+  /** 창 크기가 바뀌면 preferred는 그대로 두고 적용값만 다시 그린다. */
+  function repaint() {
     paint();
     onChange?.();
   }
@@ -94,33 +106,41 @@ export function setupChatResizer(hooks) {
     shield = null;
   }
 
+  /** @param {PointerEvent} e */
+  function onMove(e) {
+    // 리사이저 중앙이 커서에 오도록 맞춘다.
+    setWidth(window.innerWidth - e.clientX - RESIZER_WIDTH / 2);
+  }
+
+  function endDrag() {
+    document.removeEventListener('pointermove', onMove);
+    document.removeEventListener('pointerup', endDrag);
+    document.removeEventListener('pointercancel', endDrag);
+    resizer.classList.remove('mlpp-dragging');
+    removeShield();
+    save('chatWidth', preferred);
+  }
+
   resizer.addEventListener('pointerdown', (e) => {
     if (e.button !== 0) return;
     e.preventDefault();
-    resizer.setPointerCapture(e.pointerId);
+    // 포인터 캡처는 창 밖으로 나가도 이벤트를 받기 위한 보강일 뿐이다.
+    // 실패해도 문서 레벨 리스너 + 실드로 드래그가 성립해야 한다.
+    try {
+      resizer.setPointerCapture(e.pointerId);
+    } catch {
+      /* 캡처 없이 진행 */
+    }
     resizer.classList.add('mlpp-dragging');
     addShield();
+    document.addEventListener('pointermove', onMove);
+    document.addEventListener('pointerup', endDrag);
+    document.addEventListener('pointercancel', endDrag);
   });
-
-  resizer.addEventListener('pointermove', (e) => {
-    if (!resizer.hasPointerCapture(e.pointerId)) return;
-    // 리사이저 중앙이 커서에 오도록 맞춘다.
-    setWidth(window.innerWidth - e.clientX - RESIZER_WIDTH / 2);
-  });
-
-  for (const type of /** @type {const} */ (['pointerup', 'pointercancel'])) {
-    resizer.addEventListener(type, (e) => {
-      if (!resizer.hasPointerCapture(e.pointerId)) return;
-      resizer.releasePointerCapture(e.pointerId);
-      resizer.classList.remove('mlpp-dragging');
-      removeShield();
-      save('chatWidth', width);
-    });
-  }
 
   resizer.addEventListener('dblclick', () => {
     setWidth(DEFAULT_WIDTH);
-    save('chatWidth', width);
+    save('chatWidth', preferred);
   });
 
   // 채팅 열기/닫기 시 리사이저 표시 여부를 맞춘다.
@@ -128,12 +148,12 @@ export function setupChatResizer(hooks) {
     attributes: true,
     attributeFilter: ['src'],
   });
-  window.addEventListener('resize', () => setWidth(width)); // 창이 좁아지면 상한에 맞춰 줄인다
+  window.addEventListener('resize', repaint); // 상한이 바뀌므로 적용값을 다시 계산한다
 
   paint();
 
   return {
-    reservedWidth: () => width + RESIZER_WIDTH,
+    reservedWidth: () => effective() + RESIZER_WIDTH,
     schedule: (fn) => {
       onChange = fn;
     },

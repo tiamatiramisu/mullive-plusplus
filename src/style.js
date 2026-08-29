@@ -7,9 +7,13 @@
  * 레이아웃처럼 매 resize마다 값이 바뀌는 규칙을 다루기 위해 필요하다.
  *
  * 주입 경로 3단 폴백:
- *   1. GM_addStyle        — 유저스크립트 매니저가 CSP를 우회해 주입
- *   2. adoptedStyleSheets — CSSOM 경로. mul.live에서 동작 확인됨
- *   3. <style> 직접 삽입  — mul.live에서는 style-src-elem에 막힌다. 다른 사이트용 최후 수단
+ *   1. adoptedStyleSheets — CSSOM 경로. CSP 검사 대상이 아니고 replaceSync로 전체 교체가 싸다
+ *   2. GM_addStyle        — 유저스크립트 매니저 주입
+ *   3. <style> 직접 삽입  — 최후 수단
+ *
+ * CSSOM을 먼저 쓰는 이유: Violentmonkey의 GM_addStyle은 mul.live에서 스타일이 실제로 적용되긴 하지만
+ * (차단이 아니라 보고만 됨) 삽입·갱신마다 style-src-elem 위반 이벤트를 남긴다.
+ * 레이아웃은 리사이즈 프레임마다 갱신되므로 그쪽 경로를 쓰면 콘솔이 위반으로 뒤덮인다.
  *
  * 각 단계는 반드시 "실제로 적용됐는지"로 판정한다.
  * CSP에 막힌 <style> 요소도 DOM에는 그대로 남아 isConnected가 true이므로,
@@ -81,8 +85,8 @@ function tryElement() {
 
 function install() {
   for (const [name, fn] of /** @type {const} */ ([
-    ['gm', tryGm],
     ['cssom', tryCssom],
+    ['gm', tryGm],
     ['element', tryElement],
   ])) {
     reset();
@@ -93,11 +97,13 @@ function install() {
     }
     if (isApplied()) {
       mode = name;
+      document.documentElement.dataset.mlppStyle = name;
       return;
     }
   }
   reset();
   mode = 'failed';
+  document.documentElement.dataset.mlppStyle = 'failed';
 }
 
 function flush() {

@@ -68,10 +68,11 @@ export function isChatVisible(hooks) {
  * @param {() => number} reservedWidth 채팅 패널이 차지하는 폭(px)을 돌려주는 함수
  */
 export function startLayout(hooks, reservedWidth) {
-  let frame = 0;
+  /** @type {ReturnType<typeof setTimeout> | 0} */
+  let timer = 0;
 
   function apply() {
-    frame = 0;
+    timer = 0;
     const gap = load('tileGap', 4);
     const reserved = isChatVisible(hooks) ? reservedWidth() : 0;
     const availW = window.innerWidth - reserved - SLACK;
@@ -84,6 +85,7 @@ export function startLayout(hooks, reservedWidth) {
       `#streams {
   gap: ${gap}px !important;
   width: auto !important;
+  min-width: 0 !important;
   align-content: center !important;
   justify-content: center !important;
 }
@@ -95,9 +97,11 @@ export function startLayout(hooks, reservedWidth) {
     );
   }
 
+  // requestAnimationFrame을 쓰지 않는다. 백그라운드 탭에서는 rAF가 아예 발화하지 않아
+  // 예약된 재계산이 무한정 밀린다. setTimeout은 throttle될 뿐 반드시 발화한다.
   function schedule() {
-    if (frame) return;
-    frame = requestAnimationFrame(apply);
+    if (timer) return;
+    timer = setTimeout(apply, 0);
   }
 
   window.addEventListener('resize', schedule);

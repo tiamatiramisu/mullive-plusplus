@@ -7,8 +7,11 @@ import { startLayout } from './layout.js';
 const VERSION = typeof GM_info !== 'undefined' ? GM_info.script.version : 'dev';
 
 // 우리 주입이 CSP에 걸리는지 관측한다. 페이지 자신도 이 이벤트를 쓰므로(네이버 로그인) 로그만 남긴다.
+// 위반이 반복되는 경로가 있어 몇 건만 남기고 멈춘다.
+let cspReports = 0;
 document.addEventListener('securitypolicyviolation', (e) => {
-  warn('CSP violation:', e.violatedDirective, '<-', e.blockedURI);
+  if (++cspReports > 3) return;
+  warn(`CSP violation (${cspReports}/3):`, e.violatedDirective, '<-', e.blockedURI);
 });
 
 main();
