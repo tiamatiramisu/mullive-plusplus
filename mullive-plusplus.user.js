@@ -4,7 +4,7 @@
 // @name:en      Mul.Live Multiview Enhancer
 // @name:ja-JP   Mul.Live マルチビュー強化
 // @namespace    http://tampermonkey.net/
-// @version      0.3.1
+// @version      0.3.2
 // @license      MIT
 // @description       Resizable chat panel, background-persistent chats, smarter video grid layout and drag-to-swap tiles for Mul.Live.
 // @description:en    Resizable chat panel, background-persistent chats, smarter video grid layout and drag-to-swap tiles for Mul.Live.
@@ -189,6 +189,14 @@
     },
     chatWidth: { name: "사이드 채팅 폭 (px)", title: "리사이저를 끌어도 바뀐다.", type: "int", value: 350, min: 240, max: 1600 },
     tileGap: { name: "타일 간격 (px)", type: "int", value: 4, min: 0, max: 40 },
+    chatStagger: {
+      name: "채팅 생성 간격 (ms)",
+      title: "채팅을 한꺼번에 띄우면 플레이어들이 동시에 재생을 시작하는 시점과 겹쳐 로딩이 실패할 수 있다. 하나씩 이 간격을 두고 만든다.",
+      type: "int",
+      value: 800,
+      min: 0,
+      max: 5e3
+    },
     chatLimit: {
       name: "동시 유지 채팅 수 (0 = 무제한)",
       title: "유지 중인 채팅이 이 수를 넘으면 오래 안 본 것부터 렌더를 멈춘다. 연결은 유지되므로 다시 열면 즉시 보인다.",
@@ -253,26 +261,79 @@
   }
 
   // src/chats.js
+  var stagger = () => get("chatStagger");
   function createChatManager(hooks, root, canCreate) {
     const options = readChatOptions(hooks.chatSelect);
     const frames = /* @__PURE__ */ new Map();
+    const placeholders = /* @__PURE__ */ new Map();
+    const loaded = /* @__PURE__ */ new Set();
     const lastShown = /* @__PURE__ */ new Map();
+    const loadListeners = /* @__PURE__ */ new Set();
     const usable = options.filter((o) => !o.disabled).map((o) => o.index);
+    function onFrameLoad(fn) {
+      loadListeners.add(fn);
+    }
+    function ensurePlaceholder(index) {
+      const existing = placeholders.get(index);
+      if (existing) return existing;
+      const el = document.createElement("div");
+      el.id = `mlpp-ph-${index}`;
+      el.className = "mlpp-placeholder";
+      el.textContent = `${options[index]?.label ?? ""} 채팅 불러오는 중…`;
+      root.append(el);
+      placeholders.set(index, el);
+      return el;
+    }
+    const queue = [];
+    let queueTimer = (
+      /** @type {ReturnType<typeof setTimeout> | 0} */
+      0
+    );
+    let lastCreated = 0;
+    function pump() {
+      if (queueTimer || queue.length === 0) return;
+      const wait = Math.max(0, lastCreated + stagger() - Date.now());
+      queueTimer = setTimeout(() => {
+        queueTimer = 0;
+        const index = queue.shift();
+        if (index !== void 0) {
+          create(index);
+          lastCreated = Date.now();
+          loadListeners.forEach((fn) => fn());
+        }
+        pump();
+      }, wait);
+    }
+    function create(index) {
+      const option = options[index];
+      if (!option || frames.has(index)) return;
+      const frame = document.createElement("iframe");
+      frame.id = `mlpp-chat-${index}`;
+      frame.setAttribute("frameborder", "0");
+      frame.setAttribute("scrolling", "no");
+      frame.name = `mlpp-chat-${index}`;
+      frame.addEventListener("load", () => {
+        loaded.add(index);
+        loadListeners.forEach((fn) => fn());
+      });
+      frame.src = option.url;
+      root.append(frame);
+      frames.set(index, frame);
+    }
     function ensure(index) {
       const existing = frames.get(index);
       if (existing) return existing;
       const option = options[index];
       if (!option || option.disabled) return null;
       if (!canCreate(index)) return null;
-      const frame = document.createElement("iframe");
-      frame.id = `mlpp-chat-${index}`;
-      frame.setAttribute("frameborder", "0");
-      frame.setAttribute("scrolling", "no");
-      frame.name = `mlpp-chat-${index}`;
-      frame.src = option.url;
-      root.append(frame);
-      frames.set(index, frame);
-      return frame;
+      if (!queue.includes(index)) {
+        queue.push(index);
+        pump();
+      }
+      return null;
+    }
+    function isLoaded(index) {
+      return loaded.has(index);
     }
     function sync(visible, limit) {
       const now = Date.now();
@@ -303,6 +364,9 @@
       options,
       usable,
       ensure,
+      ensurePlaceholder,
+      isLoaded,
+      onFrameLoad,
       sync,
       /** 선택 가능한 첫 채팅. 없으면 -1. */
       firstUsable: () => usable[0] ?? -1
@@ -404,9 +468,21 @@
 }
 #mlpp-chats iframe {
   position: absolute !important;
+  z-index: 2 !important;
   border: 0 !important;
   background-color: #141517 !important;
   pointer-events: auto !important;
+}
+#mlpp-chats .mlpp-placeholder {
+  position: absolute !important;
+  z-index: 3 !important;
+  display: none !important;
+  align-items: center !important;
+  justify-content: center !important;
+  background-color: #141517 !important;
+  color: #8a8f98 !important;
+  font-size: 14px !important;
+  pointer-events: none !important;
 }
 #chat-select {
   position: absolute !important;
@@ -468,9 +544,23 @@
       const columns = layout.mode === "columns";
       const parked = { x: W - cw, y: SELECT_HEIGHT, w: cw, h: Math.max(1, H - SELECT_HEIGHT) };
       const visible = columns ? chats.usable : chatVisible && active >= 0 ? [active] : [];
+      const slots = /* @__PURE__ */ new Map();
+      if (columns) {
+        for (const i of visible) {
+          const r = layout.chats[i];
+          if (r) slots.set(i, r);
+        }
+      } else if (visible.length > 0 && layout.chats[0]) {
+        slots.set(visible[0], layout.chats[0]);
+      }
       const states = chats.sync(visible, get("chatLimit"));
       const rules = [BASE_CSS];
       layout.videos.forEach((r, i) => rules.push(place(`#streams iframe:nth-child(${i + 1})`, r)));
+      for (const [index, slot] of slots) {
+        if (chats.isLoaded(index)) continue;
+        const ph = chats.ensurePlaceholder(index);
+        rules.push(place(`#${ph.id}`, slot, "display: flex !important;"));
+      }
       for (const { index, state } of states) {
         const selector = `#mlpp-chat-${index}`;
         if (state === "suspended") {
@@ -479,7 +569,7 @@
         }
         let slot = parked;
         if (state === "visible") {
-          const found = columns ? layout.chats[index] : layout.chats[0];
+          const found = slots.get(index);
           if (!found) continue;
           slot = found;
         }
@@ -573,14 +663,15 @@
     });
     window.addEventListener("resize", schedule);
     onChange(schedule);
+    chats.onFrameLoad(schedule);
     render();
     return { schedule, render };
   }
 
   // src/ready.js
   var SOOP_ORIGIN = /^https:\/\/play\.sooplive\.(com|co\.kr)$/;
-  var SETTLE_MS = 2e3;
-  var GIVE_UP_MS = 15e3;
+  var SETTLE_MS = 500;
+  var GIVE_UP_MS = 1e4;
   var ready = /* @__PURE__ */ new Set();
   var listeners2 = /* @__PURE__ */ new Set();
   var gaveUp = false;
@@ -594,17 +685,18 @@
   }
   function watchPlayers() {
     window.addEventListener("message", (e) => {
-      if (!(e.source instanceof Window)) return;
+      const source = e.source;
+      if (!source) return;
       if (!SOOP_ORIGIN.test(e.origin)) return;
       const cmd = (
         /** @type {{ cmd?: string } | null} */
         e.data?.cmd
       );
       if (cmd === "PupdateBroadInfo") {
-        markReady(e.source);
+        markReady(source);
       } else if (cmd === "PonReady") {
-        const source = e.source;
-        setTimeout(() => markReady(source), SETTLE_MS);
+        if (SETTLE_MS > 0) setTimeout(() => markReady(source), SETTLE_MS);
+        else markReady(source);
       }
     });
     setTimeout(() => {
