@@ -4,7 +4,7 @@
 // @name:en      Mul.Live Multiview Enhancer
 // @name:ja-JP   Mul.Live マルチビュー強化
 // @namespace    http://tampermonkey.net/
-// @version      0.14.0
+// @version      0.15.0
 // @license      MIT
 // @description       Resizable chat panel, background-persistent chats, smarter video grid layout and drag-to-swap tiles for Mul.Live.
 // @description:en    Resizable chat panel, background-persistent chats, smarter video grid layout and drag-to-swap tiles for Mul.Live.
@@ -405,7 +405,7 @@
 
   // src/audio.js
   var SOLO_GLOW = "rgba(76, 141, 255, 0.5)";
-  var MUTED_GLOW = "rgba(255, 77, 77, 0.45)";
+  var SOLO_RIPPLE = "rgba(96, 155, 255, 0.95)";
   var PULSE_PERIOD_MS = 1500;
   var PULSE_STAGGER_MS = 170;
   var BASE_CSS = `
@@ -427,12 +427,15 @@
   box-shadow: 0 0 14px 3px var(--mlpp-glow, transparent) !important;
 }
 /* 파동은 별도 자식이 맡는다. 바탕 글로우와 box-shadow 가 서로 덮어쓰지 않게 하려는 것이다.
-   peak 순간마다 한 발씩 쏘고, 애니메이션이 끝나면 사라진다. */
+   peak 순간마다 한 발씩 쏘고, 애니메이션이 끝나면 사라진다.
+
+   opacity 에 !important 를 붙이면 안 된다. CSS 캐스케이드에서 important 선언은
+   애니메이션보다 우선이라, Web Animations 가 올린 opacity 가 0으로 눌려 영영 안 보인다. */
 .mlpp-ripple {
   position: absolute !important;
   inset: 0 !important;
-  opacity: 0 !important;
   pointer-events: none !important;
+  opacity: 0;
 }
 `;
   function createAudioMixer({ players, root, bus }) {
@@ -468,13 +471,14 @@
       const node = el?.querySelector(".mlpp-ripple");
       const color = colors.get(index);
       if (!node || !color || !shown.includes(index)) return;
-      const spread = Math.round(10 + strength * 22);
+      const spread = Math.round(16 + strength * 26);
       node.animate(
         [
-          { boxShadow: `0 0 1px 0px ${color}`, opacity: 0.95 },
-          { boxShadow: `0 0 6px ${spread}px ${color}`, opacity: 0 }
+          { boxShadow: `0 0 2px 0px ${color}`, opacity: 1, offset: 0 },
+          { boxShadow: `0 0 6px ${Math.round(spread * 0.45)}px ${color}`, opacity: 0.75, offset: 0.35 },
+          { boxShadow: `0 0 12px ${spread}px ${color}`, opacity: 0, offset: 1 }
         ],
-        { duration: 620, easing: "cubic-bezier(0.2, 0.65, 0.3, 1)" }
+        { duration: 900, easing: "cubic-bezier(0.15, 0.7, 0.3, 1)" }
       );
     }
     function retimePulses() {
@@ -494,7 +498,6 @@
     function apply() {
       const set2 = active();
       const soloing = set2.size > 0;
-      const fromAudio = get("glowFromAudio") !== 0;
       players.forEach((_, index) => {
         const muted = soloing && !set2.has(index);
         if (sent.get(index) !== muted) {
@@ -502,18 +505,16 @@
           bus.send(index, { kind: "mute", muted });
         }
       });
-      const hoveredKind = hovered < 0 ? null : set2.has(hovered) ? "solo" : "muted";
       const rules = [BASE_CSS];
       const next = [];
       for (const [index, r] of rects) {
         const el = ensureOverlay(index);
-        const kind = set2.has(index) ? "solo" : "muted";
-        if (!soloing || hoveredKind === null || kind !== hoveredKind) {
+        if (!soloing || !set2.has(index)) {
           rules.push(`#${el.id} { display: none !important; }`);
           continue;
         }
-        const glow = kind === "solo" ? SOLO_GLOW : MUTED_GLOW;
-        colors.set(index, glow);
+        const glow = SOLO_GLOW;
+        colors.set(index, SOLO_RIPPLE);
         next.push(index);
         rules.push(
           `#${el.id} { display: block !important; left: ${r.x}px !important; top: ${r.y}px !important; width: ${r.w}px !important; height: ${r.h}px !important; --mlpp-glow: ${glow} !important; }`
