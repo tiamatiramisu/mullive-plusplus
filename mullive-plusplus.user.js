@@ -4,7 +4,7 @@
 // @name:en      Mul.Live Multiview Enhancer
 // @name:ja-JP   Mul.Live マルチビュー強化
 // @namespace    http://tampermonkey.net/
-// @version      0.8.0
+// @version      0.9.0
 // @license      MIT
 // @description       Resizable chat panel, background-persistent chats, smarter video grid layout and drag-to-swap tiles for Mul.Live.
 // @description:en    Resizable chat panel, background-persistent chats, smarter video grid layout and drag-to-swap tiles for Mul.Live.
@@ -182,19 +182,6 @@
       help: "자동: 가로 화면이고 열 폭이 충분하면 열 모드, 아니면 사이드."
     },
     {
-      key: "minColumnWidth",
-      name: "열 모드 최소 열 폭",
-      tab: "레이아웃",
-      type: "int",
-      value: 400,
-      min: 240,
-      max: 1200,
-      unit: "px",
-      help: "열 하나의 폭이 곧 영상 폭이자 채팅 폭이다. 이보다 좁아지면 사이드로 내려간다."
-    },
-    { key: "chatWidth", name: "사이드 채팅 폭", tab: "레이아웃", type: "int", value: 350, min: 240, max: 1600, unit: "px", help: "리사이저를 끌어도 바뀐다." },
-    { key: "tileGap", name: "타일 간격", tab: "레이아웃", type: "int", value: 0, min: 0, max: 40, unit: "px" },
-    {
       key: "gridCols",
       name: "수동 격자 — 열 수",
       tab: "레이아웃",
@@ -227,7 +214,8 @@
       help: "0이면 무제한. 넘으면 오래 안 본 것부터 렌더를 멈춘다. 연결은 유지되므로 다시 열면 즉시 보인다."
     }
   ];
-  var DEFAULTS = Object.fromEntries(SCHEMA.map((f) => [f.key, f.value]));
+  var HIDDEN_DEFAULTS = { chatWidth: 350 };
+  var DEFAULTS = { ...Object.fromEntries(SCHEMA.map((f) => [f.key, f.value])), ...HIDDEN_DEFAULTS };
   var memory = /* @__PURE__ */ new Map();
   var listeners = /* @__PURE__ */ new Set();
   function onChange(fn) {
@@ -253,7 +241,7 @@
     listeners.forEach((fn) => fn());
   }
   function resetAll() {
-    for (const field of SCHEMA) set(field.key, field.value);
+    for (const [key, value] of Object.entries(DEFAULTS)) set(key, value);
   }
   var orderMemory = /* @__PURE__ */ new Map();
   function loadOrder(key, n) {
@@ -757,6 +745,8 @@ html.mlpp-swap .mlpp-tile:hover { border-color: #7aa2f7 !important; }
   var SELECT_HEIGHT = 28;
   var MIN_CHAT_WIDTH = 240;
   var DEFAULT_CHAT_WIDTH = 350;
+  var MIN_COLUMN_WIDTH = 400;
+  var TILE_GAP = 0;
   var BASE_CSS3 = `
 #streams {
   position: absolute !important;
@@ -881,14 +871,14 @@ html.mlpp-swap .mlpp-tile:hover { border-color: #7aa2f7 !important; }
       const W = window.innerWidth;
       const H = window.innerHeight;
       const n = hooks.players.length;
-      const gap = get("tileGap");
+      const gap = TILE_GAP;
       const mode2 = layoutMode();
       const cw = chatWidth();
       const forceCols = get("gridCols");
       const forceRows = get("gridRows");
       let layout = null;
       if (chatVisible && forceCols <= 0 && mode2 !== "side") {
-        layout = columnLayout(n, W, H, gap, get("minColumnWidth"), mode2 === "columns");
+        layout = columnLayout(n, W, H, gap, MIN_COLUMN_WIDTH, mode2 === "columns");
       }
       if (!layout) {
         layout = sideLayout(n, W, H, gap, cw, RESIZER_WIDTH, chatVisible, forceCols, forceRows);
