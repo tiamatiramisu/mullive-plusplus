@@ -4,7 +4,7 @@
 // @name:en      Mul.Live Multiview Enhancer
 // @name:ja-JP   Mul.Live マルチビュー強化
 // @namespace    http://tampermonkey.net/
-// @version      0.23.0
+// @version      0.24.0
 // @license      MIT
 // @description       Resizable chat panel, background-persistent chats, smarter video grid layout and drag-to-swap tiles for Mul.Live.
 // @description:en    Resizable chat panel, background-persistent chats, smarter video grid layout and drag-to-swap tiles for Mul.Live.
@@ -15,11 +15,9 @@
 // @match        https://mul.live/*
 // @match        https://www.mul.live/*
 // SOOP 플레이어 프레임 안에서도 돌아야 음소거를 조작하고 호버를 감지할 수 있다.
-// 채팅 프레임은 할 일이 없으므로 제외한다.
+// 채팅 프레임에서도 Shift+우클릭 하나만 받는다(칸 닫기). 역할은 main.js 가 가른다.
 // @match        https://play.sooplive.com/*
 // @match        https://play.sooplive.co.kr/*
-// @exclude      https://play.sooplive.com/*vtype=chat*
-// @exclude      https://play.sooplive.co.kr/*vtype=chat*
 // @grant        GM_addStyle
 // @grant        GM_setValue
 // @grant        GM_getValue
@@ -343,6 +341,24 @@
     function onFrameLoad(fn) {
       loadListeners.add(fn);
     }
+    const messageListeners = /* @__PURE__ */ new Set();
+    window.addEventListener("message", (e) => {
+      const data = (
+        /** @type {{ mlpp?: unknown, kind?: string } | null} */
+        e.data
+      );
+      if (!data || data.mlpp !== true) return;
+      let hit = -1;
+      for (const [index, frame] of frames) {
+        if (frame.contentWindow === e.source) hit = index;
+      }
+      if (hit < 0) return;
+      if (data.kind === "chatagent") {
+        e.source?.postMessage({ mlpp: true, kind: "hello" }, e.origin);
+        return;
+      }
+      messageListeners.forEach((fn) => fn(hit, data));
+    });
     function ensurePlaceholder(index) {
       const existing = placeholders.get(index);
       if (existing) return existing;
@@ -437,6 +453,10 @@
       ensurePlaceholder,
       isLoaded,
       onFrameLoad,
+      /** @param {(index: number, data: { kind?: string }) => void} fn */
+      onMessage(fn) {
+        messageListeners.add(fn);
+      },
       sync,
       /** 선택 가능한 첫 채팅. 없으면 -1. */
       firstUsable: () => usable[0] ?? -1
@@ -527,7 +547,7 @@
   function createAudioMixer({ players, root, bus }) {
     const pinned = /* @__PURE__ */ new Set();
     let hovered = -1;
-    let rects = /* @__PURE__ */ new Map();
+    let rects2 = /* @__PURE__ */ new Map();
     const overlays = /* @__PURE__ */ new Map();
     const sent = /* @__PURE__ */ new Map();
     const agents = /* @__PURE__ */ new Set();
@@ -600,7 +620,7 @@
       });
       const rules = [BASE_CSS2];
       const next = [];
-      for (const [index, r] of rects) {
+      for (const [index, r] of rects2) {
         const el = ensureOverlay(index);
         if (!soloing || !set2.has(index)) {
           rules.push(`#${el.id} { display: none !important; }`);
@@ -645,7 +665,7 @@
           if (added) pinned.add(index);
           else pinned.delete(index);
           if (masterAutoPinned === index) masterAutoPinned = -1;
-          const rect = rects.get(index);
+          const rect = rects2.get(index);
           if (rect) {
             showToast(added ? "➕S" : "➖S", rect.x + Number(data.x ?? rect.w / 2), rect.y + Number(data.y ?? rect.h / 2));
           }
@@ -667,7 +687,7 @@
       },
       /** @param {Map<number, import('./geometry.js').Rect>} next 스트림별 화면 위치 */
       update(next) {
-        rects = next;
+        rects2 = next;
         apply();
       },
       /**
@@ -870,57 +890,181 @@
     }
     return { mode: "master", videos, ...chrome };
   }
+
+  // src/panes.js
   var AREA_TIE = 0.02;
-  function splitChatPanes(region, n, minW, minH, gap) {
-    if (n <= 1) return [region];
-    const panes = [region];
-    while (panes.length < n) {
-      const stuck = /* @__PURE__ */ new Set();
-      let split = false;
-      while (!split) {
-        const target = biggest(panes, stuck);
-        if (target < 0) return null;
-        const halves = halve(panes[target], minW, minH, gap);
-        if (!halves) {
-          stuck.add(target);
-          continue;
-        }
-        panes[target] = halves[0];
-        panes.push(halves[1]);
-        split = true;
+  var nextId = 1;
+  function leaf(stream) {
+    return { id: nextId++, stream };
+  }
+  function isLeaf(node) {
+    return "stream" in node;
+  }
+  function leaves(node, out = []) {
+    if (isLeaf(node)) out.push(node);
+    else {
+      leaves(node.a, out);
+      leaves(node.b, out);
+    }
+    return out;
+  }
+  function clone(node) {
+    return isLeaf(node) ? { ...node } : { dir: node.dir, a: clone(node.a), b: clone(node.b) };
+  }
+  function rects(node, region, gap, out = /* @__PURE__ */ new Map()) {
+    if (isLeaf(node)) {
+      out.set(node.id, region);
+      return out;
+    }
+    if (node.dir === "v") {
+      const span = region.w - gap;
+      const w1 = Math.round(span / 2);
+      rects(node.a, { x: region.x, y: region.y, w: w1, h: region.h }, gap, out);
+      rects(node.b, { x: region.x + w1 + gap, y: region.y, w: span - w1, h: region.h }, gap, out);
+    } else {
+      const span = region.h - gap;
+      const h1 = Math.round(span / 2);
+      rects(node.a, { x: region.x, y: region.y, w: region.w, h: h1 }, gap, out);
+      rects(node.b, { x: region.x, y: region.y + h1 + gap, w: region.w, h: span - h1 }, gap, out);
+    }
+    return out;
+  }
+  function findLeaf(node, id) {
+    if (isLeaf(node)) return node.id === id ? node : null;
+    return findLeaf(node.a, id) ?? findLeaf(node.b, id);
+  }
+  function dirOf(side) {
+    return side === "left" || side === "right" ? (
+      /** @type {const} */
+      "v"
+    ) : (
+      /** @type {const} */
+      "h"
+    );
+  }
+  function insert(root, targetId, side, stream) {
+    const fresh = leaf(stream);
+    const walk = (node) => {
+      if (isLeaf(node)) {
+        if (node.id !== targetId) return node;
+        const dir = dirOf(side);
+        const first = side === "left" || side === "top";
+        return { dir, a: first ? fresh : node, b: first ? node : fresh };
       }
-    }
-    return panes;
+      return { dir: node.dir, a: walk(node.a), b: walk(node.b) };
+    };
+    return walk(clone(root));
   }
-  function biggest(panes, stuck) {
+  function wrap(root, side, stream) {
+    const fresh = leaf(stream);
+    const dir = dirOf(side);
+    const first = side === "left" || side === "top";
+    const inner = clone(root);
+    return { dir, a: first ? fresh : inner, b: first ? inner : fresh };
+  }
+  function remove(root, id) {
+    if (isLeaf(root)) return root;
+    const walk = (node) => {
+      if (isLeaf(node)) return node.id === id ? null : node;
+      const a = walk(node.a);
+      const b = walk(node.b);
+      if (!a) return b;
+      if (!b) return a;
+      return { dir: node.dir, a, b };
+    };
+    return walk(clone(root)) ?? root;
+  }
+  function largestLeaf(root, region, gap, skip = /* @__PURE__ */ new Set()) {
+    const area = rects(root, region, gap);
+    const list = leaves(root).filter((l) => !skip.has(l.id));
+    if (list.length === 0) return null;
     let best = 0;
-    for (let i = 0; i < panes.length; i++) {
-      if (stuck.has(i)) continue;
-      best = Math.max(best, panes[i].w * panes[i].h);
+    for (const l of list) {
+      const r = area.get(l.id);
+      if (r) best = Math.max(best, r.w * r.h);
     }
-    if (best === 0) return -1;
-    let pick = -1;
-    for (let i = 0; i < panes.length; i++) {
-      if (!stuck.has(i) && panes[i].w * panes[i].h >= best * (1 - AREA_TIE)) pick = i;
+    let pick2 = null;
+    for (const l of list) {
+      const r = area.get(l.id);
+      if (r && r.w * r.h >= best * (1 - AREA_TIE)) pick2 = l;
     }
-    return pick;
+    return pick2;
   }
-  function halve(r, minW, minH, gap) {
-    const w1 = Math.round((r.w - gap) / 2);
-    if (r.h >= minH && w1 >= minW && r.w - gap - w1 >= minW) {
-      return [
-        { x: r.x, y: r.y, w: w1, h: r.h },
-        { x: r.x + w1 + gap, y: r.y, w: r.w - gap - w1, h: r.h }
-      ];
+  function autoSplit(root, region, gap, minW, minH, stream) {
+    const skip = /* @__PURE__ */ new Set();
+    for (; ; ) {
+      const target = largestLeaf(root, region, gap, skip);
+      if (!target) return null;
+      const r = rects(root, region, gap).get(target.id);
+      if (!r) return null;
+      const sides = r.h >= minH && Math.round((r.w - gap) / 2) >= minW ? ["right"] : ["bottom"];
+      for (const side of sides) {
+        const next = insert(root, target.id, side, stream);
+        if (fits(next, region, gap, minW, minH)) return next;
+      }
+      skip.add(target.id);
     }
-    const h1 = Math.round((r.h - gap) / 2);
-    if (r.w >= minW && h1 >= minH && r.h - gap - h1 >= minH) {
-      return [
-        { x: r.x, y: r.y, w: r.w, h: h1 },
-        { x: r.x, y: r.y + h1 + gap, w: r.w, h: r.h - gap - h1 }
-      ];
+  }
+  function fits(root, region, gap, minW, minH) {
+    if (isLeaf(root)) return true;
+    for (const r of rects(root, region, gap).values()) {
+      if (r.w < minW || r.h < minH) return false;
+    }
+    return true;
+  }
+  function trimToFit(root, region, gap, minW, minH) {
+    let node = root;
+    while (!fits(node, region, gap, minW, minH)) {
+      const list = leaves(node);
+      if (list.length <= 1) break;
+      const newest = list.reduce((best, l) => l.id > best.id ? l : best, list[0]);
+      node = remove(node, newest.id);
+    }
+    return node;
+  }
+
+  // src/dropzone.js
+  var EDGE_BAND = 40;
+  var PANE_BAND = 0.28;
+  function zoneAt(x, y, region, paneRects) {
+    if (x < region.x || y < region.y || x >= region.x + region.w || y >= region.y + region.h) return null;
+    const dl = x - region.x;
+    const dr = region.x + region.w - x;
+    const dt = y - region.y;
+    const db = region.y + region.h - y;
+    const nearest = Math.min(dl, dr, dt, db);
+    if (nearest < EDGE_BAND) return { kind: "edge", side: pick(nearest, dl, dr, dt, db) };
+    for (const [id, r] of paneRects) {
+      if (x < r.x || y < r.y || x >= r.x + r.w || y >= r.y + r.h) continue;
+      const fl = (x - r.x) / r.w;
+      const fr = 1 - fl;
+      const ft = (y - r.y) / r.h;
+      const fb = 1 - ft;
+      const near = Math.min(fl, fr, ft, fb);
+      if (near > PANE_BAND) return { kind: "center", id };
+      return { kind: "pane", id, side: pick(near, fl, fr, ft, fb) };
     }
     return null;
+  }
+  function pick(near, l, r, t, b) {
+    if (near === l) return "left";
+    if (near === r) return "right";
+    if (near === t) return "top";
+    return b === near ? "bottom" : "top";
+  }
+  function previewRect(zone, region, paneRects) {
+    if (zone.kind === "edge") return half(region, zone.side);
+    const r = paneRects.get(zone.id);
+    if (!r) return null;
+    return zone.kind === "center" ? r : half(r, zone.side);
+  }
+  function half(r, side) {
+    const w = Math.round(r.w / 2);
+    const h = Math.round(r.h / 2);
+    if (side === "left") return { x: r.x, y: r.y, w, h: r.h };
+    if (side === "right") return { x: r.x + r.w - w, y: r.y, w, h: r.h };
+    if (side === "top") return { x: r.x, y: r.y, w: r.w, h };
+    return { x: r.x, y: r.y + r.h - h, w: r.w, h };
   }
 
   // src/dnd.js
@@ -956,21 +1100,25 @@ html.mlpp-swap .mlpp-tile {
   display: flex !important;
   pointer-events: auto !important;
 }
-html.mlpp-swap .mlpp-tile:hover { border-color: #7aa2f7 !important; }
+/* 잡기 전 호버는 색을 쓰지 않는다. 보라와 파랑은 끄는 동안의 뜻이 정해져 있다. */
+html.mlpp-swap .mlpp-tile:hover { border-color: rgba(255, 255, 255, 0.7) !important; }
+/* 잡은 곳은 보라, 놓을 곳은 파랑. */
 .mlpp-tile.mlpp-from {
-  border-color: #7aa2f7 !important;
-  background-color: rgba(122, 162, 247, 0.25) !important;
+  border-color: #bb9af7 !important;
+  background-color: rgba(187, 154, 247, 0.25) !important;
   cursor: grabbing !important;
 }
 .mlpp-tile.mlpp-over {
-  border-color: #9ece6a !important;
-  background-color: rgba(158, 206, 106, 0.25) !important;
+  border-color: #7aa2f7 !important;
+  background-color: rgba(122, 162, 247, 0.25) !important;
 }
 `;
   function createDragSwap({ root, labelOf, swap, schedule }) {
-    let rects = [];
+    let rects2 = [];
     const overlays = /* @__PURE__ */ new Map();
     let active = false;
+    let selfAlt = false;
+    const frameAlt = /* @__PURE__ */ new Set();
     let from = -1;
     let over = -1;
     let shield = null;
@@ -989,11 +1137,11 @@ html.mlpp-swap .mlpp-tile:hover { border-color: #7aa2f7 !important; }
       return el;
     }
     function slotAt(x, y) {
-      return rects.findIndex((r) => x >= r.x && x < r.x + r.w && y >= r.y && y < r.y + r.h);
+      return rects2.findIndex((r) => x >= r.x && x < r.x + r.w && y >= r.y && y < r.y + r.h);
     }
     function paint() {
       const rules = [BASE_CSS3];
-      rects.forEach((r, slot) => {
+      rects2.forEach((r, slot) => {
         const el = ensureOverlay(slot);
         const label = el.querySelector(".mlpp-tile-label");
         if (label) label.textContent = labelOf(slot);
@@ -1004,15 +1152,19 @@ html.mlpp-swap .mlpp-tile:hover { border-color: #7aa2f7 !important; }
         );
       });
       for (const [slot, el] of overlays) {
-        if (slot >= rects.length) rules.push(`#${el.id} { display: none !important; }`);
+        if (slot >= rects2.length) rules.push(`#${el.id} { display: none !important; }`);
       }
       setStyle("dnd", rules.join("\n"));
     }
     function setActive(next) {
+      if (!next && from >= 0) return;
       if (active === next) return;
       active = next;
       document.documentElement.classList.toggle("mlpp-swap", active);
       if (!active) endDrag(false);
+    }
+    function refresh() {
+      setActive(selfAlt || frameAlt.size > 0);
     }
     function onDown(e, slot) {
       if (!active || e.button !== 0) return;
@@ -1042,9 +1194,11 @@ html.mlpp-swap .mlpp-tile:hover { border-color: #7aa2f7 !important; }
         swap(source, target);
         schedule();
       }
+      refresh();
     }
     function onCancel() {
       endDrag(true);
+      refresh();
     }
     function endDrag(repaint) {
       document.removeEventListener("pointermove", onMove);
@@ -1057,16 +1211,45 @@ html.mlpp-swap .mlpp-tile:hover { border-color: #7aa2f7 !important; }
       if (repaint) paint();
     }
     window.addEventListener("keydown", (e) => {
-      if (e.key === "Alt") setActive(true);
+      if (!e.altKey && e.key !== "Alt") return;
+      selfAlt = true;
+      refresh();
     });
     window.addEventListener("keyup", (e) => {
-      if (e.key === "Alt") setActive(false);
+      if (e.key !== "Alt" && e.altKey) return;
+      selfAlt = false;
+      refresh();
     });
-    window.addEventListener("blur", () => setActive(false));
+    document.addEventListener("mousemove", (e) => {
+      if (selfAlt === e.altKey && (e.altKey || frameAlt.size === 0)) return;
+      selfAlt = e.altKey;
+      if (!e.altKey) frameAlt.clear();
+      refresh();
+    });
+    window.addEventListener("blur", () => {
+      selfAlt = false;
+      refresh();
+    });
+    document.addEventListener("visibilitychange", () => {
+      if (!document.hidden) return;
+      selfAlt = false;
+      frameAlt.clear();
+      refresh();
+    });
     return {
+      /**
+       * 프레임 안 에이전트가 알려온 Alt 상태.
+       * @param {number} index
+       * @param {boolean} on
+       */
+      setFrameAlt(index, on) {
+        if (on) frameAlt.add(index);
+        else frameAlt.delete(index);
+        refresh();
+      },
       /** @param {import('./geometry.js').Rect[]} videoRects */
       update(videoRects) {
-        rects = videoRects;
+        rects2 = videoRects;
         paint();
       },
       hint: MODIFIER_HINT
@@ -1082,6 +1265,8 @@ html.mlpp-swap .mlpp-tile:hover { border-color: #7aa2f7 !important; }
   var DEFAULT_CHAT_WIDTH = 350;
   var MIN_COLUMN_WIDTH = 400;
   var TILE_GAP = 0;
+  var DRAG_SLOP = 6;
+  var MENU_GRACE_MS = 300;
   var HOVER_GRACE_MS = 700;
   var BASE_CSS4 = `
 #streams {
@@ -1131,6 +1316,23 @@ html.mlpp-swap .mlpp-tile:hover { border-color: #7aa2f7 !important; }
 /* 페이지의 채팅 드롭다운은 감춘다. 우클릭과 설정 패널이 그 일을 대신한다.
    값은 계속 맞춰 둔다 — 드래그 라벨이 이 select 의 옵션 텍스트를 읽는다. */
 #chat-select { display: none !important; }
+/* 드롭 표시. 드래그 타일(7)보다 위에 둔다. */
+#mlpp-dropbg, #mlpp-drop {
+  position: absolute !important;
+  z-index: 8 !important;
+  display: none !important;
+  box-sizing: border-box !important;
+  pointer-events: none !important;
+}
+#mlpp-dropbg {
+  border: 2px dashed rgba(255, 255, 255, 0.3) !important;
+  background-color: rgba(0, 0, 0, 0.28) !important;
+}
+#mlpp-drop {
+  border: 2px solid #7aa2f7 !important;
+  border-radius: 4px !important;
+  background-color: rgba(122, 162, 247, 0.28) !important;
+}
 /* 잡는 영역은 세로 전체로 넓게 두되, 보이는 것은 가운데의 짧은 그립뿐이다.
    막대를 세로로 길게 그리면 영상과 채팅 사이에 경계선이 생겨 눈에 거슬린다. */
 #mlpp-resizer {
@@ -1168,23 +1370,57 @@ html.mlpp-swap .mlpp-tile:hover { border-color: #7aa2f7 !important; }
     resizer.id = "mlpp-resizer";
     resizer.title = "채팅 폭 조절 (더블클릭: 기본값)";
     chatsRoot.append(resizer);
+    const dropBg = document.createElement("div");
+    dropBg.id = "mlpp-dropbg";
+    const dropBox = document.createElement("div");
+    dropBox.id = "mlpp-drop";
+    chatsRoot.append(dropBg, dropBox);
     let timer = 0;
     let chatVisible = true;
-    let panes = [chats.firstUsable()].filter((i) => i >= 0);
+    let tree = (
+      /** @type {import('./panes.js').PaneNode} */
+      leaf(chats.firstUsable())
+    );
     let preview = -1;
     let chatRegion = (
       /** @type {import('./geometry.js').Rect | null} */
       null
     );
-    function visiblePanes() {
-      const base = panes.filter((i) => chats.usable.includes(i));
-      if (preview < 0 || get("chatHoverPreview") === 0 || base.includes(preview)) return base;
-      if (base.length === 0) return [preview];
-      return [...base.slice(0, -1), preview];
+    let paneBoxes = (
+      /** @type {Map<number, import('./geometry.js').Rect>} */
+      /* @__PURE__ */ new Map()
+    );
+    function newestLeaf() {
+      return leaves(tree).reduce((best, l) => l.id > best.id ? l : best);
     }
-    function paneRoom(n) {
-      if (n <= 1) return true;
-      return !chatRegion || splitChatPanes(chatRegion, n, MIN_PANE_WIDTH, MIN_PANE_HEIGHT, TILE_GAP) !== null;
+    function largestLeaf2() {
+      return chatRegion ? largestLeaf(tree, chatRegion, TILE_GAP) : newestLeaf();
+    }
+    function leafOfStream(stream) {
+      return leaves(tree).find((l) => l.stream === stream) ?? null;
+    }
+    function swapStreams(a, b) {
+      const held = a.stream;
+      a.stream = b.stream;
+      b.stream = held;
+    }
+    function addPane(stream) {
+      if (!chatRegion) return false;
+      const next = autoSplit(tree, chatRegion, TILE_GAP, MIN_PANE_WIDTH, MIN_PANE_HEIGHT, stream);
+      if (!next) return false;
+      tree = next;
+      return true;
+    }
+    function closePane(id) {
+      const held = findLeaf(tree, id);
+      if (!held) return null;
+      if (held.stream === masterChat) masterChat = -1;
+      if (leaves(tree).length === 1) {
+        chatVisible = false;
+        return "➖💬";
+      }
+      tree = remove(tree, id);
+      return "➖💬";
     }
     let master = -1;
     let ignoreHoverUntil = 0;
@@ -1204,58 +1440,175 @@ html.mlpp-swap .mlpp-tile:hover { border-color: #7aa2f7 !important; }
       root: chatsRoot,
       labelOf: (slot) => hooks.chatSelect.options[slotStream[slot]]?.textContent ?? "",
       swap: (a, b) => {
-        const ia = order.indexOf(slotStream[a]);
-        const ib = order.indexOf(slotStream[b]);
+        const sa = slotStream[a];
+        const sb = slotStream[b];
+        const ia = order.indexOf(sa);
+        const ib = order.indexOf(sb);
         if (ia < 0 || ib < 0) return;
         [order[ia], order[ib]] = [order[ib], order[ia]];
         saveOrder(orderKey, order);
+        if (master >= 0 && (a === 0 || b === 0)) {
+          master = a === 0 ? sb : sa;
+          setMasterChat(master);
+          audio.setMaster(master);
+        }
       },
       schedule: () => schedule()
     });
     function setMasterChat(index) {
       if (get("masterFollowsChat") === 0) return;
       if (masterChat >= 0 && masterChat !== index) {
-        panes = masterChatAuto ? panes.filter((i) => i !== masterChat) : [...panes.filter((i) => i !== masterChat), masterChat];
+        const old = leafOfStream(masterChat);
+        if (old && masterChatAuto) closePane(old.id);
+        else if (old) {
+          const smallest = smallestLeaf();
+          if (smallest && smallest.id !== old.id) swapStreams(old, smallest);
+        }
         masterChat = -1;
         masterChatAuto = false;
       }
       if (index < 0 || !chats.usable.includes(index)) return;
-      masterChatAuto = !panes.includes(index);
-      panes = [index, ...panes.filter((i) => i !== index)];
-      masterChat = index;
       chatVisible = true;
+      masterChatAuto = !leafOfStream(index);
+      if (masterChatAuto && !addPane(index)) {
+        const big2 = largestLeaf2();
+        if (big2) big2.stream = index;
+        masterChatAuto = false;
+      }
+      const holder = leafOfStream(index);
+      const big = largestLeaf2();
+      if (holder && big && holder.id !== big.id) swapStreams(holder, big);
+      masterChat = index;
+    }
+    function smallestLeaf() {
+      const list = leaves(tree);
+      if (!chatRegion) return list[list.length - 1];
+      const boxes = rects(tree, chatRegion, TILE_GAP);
+      return list.reduce((best, l) => {
+        const a = boxes.get(l.id);
+        const b = boxes.get(best.id);
+        return a && b && a.w * a.h < b.w * b.h ? l : best;
+      }, list[0]);
     }
     function switchPane(index) {
       chatVisible = true;
-      if (panes.includes(index)) return null;
-      if (panes[panes.length - 1] === masterChat) masterChat = -1;
-      panes = panes.length === 0 ? [index] : [...panes.slice(0, -1), index];
+      if (leafOfStream(index)) return null;
+      const target = newestLeaf();
+      if (target.stream === masterChat) masterChat = -1;
+      target.stream = index;
       return "🔄💬";
     }
-    function toastAt(index, data, text) {
+    function docPoint(index, data) {
       const r = videoRects.get(index);
-      if (!r) return;
-      showToast(text, r.x + (Number(data.x) || r.w / 2), r.y + (Number(data.y) || r.h / 2));
+      if (!r) return null;
+      return { x: r.x + (Number(data.x) || r.w / 2), y: r.y + (Number(data.y) || r.h / 2) };
+    }
+    let rcDrag = null;
+    let dropZone = null;
+    let dropShield = null;
+    function swallowMenu(e) {
+      e.preventDefault();
+      e.stopPropagation();
+    }
+    function sameZone(a, b) {
+      if (!a || !b) return a === b;
+      if (a.kind !== b.kind) return false;
+      const ai = a.kind === "edge" ? -1 : a.id;
+      const bi = b.kind === "edge" ? -1 : b.id;
+      const as = a.kind === "center" ? "" : a.side;
+      const bs = b.kind === "center" ? "" : b.side;
+      return ai === bi && as === bs;
+    }
+    function startRightDrag(stream, shift, x, y) {
+      if (rcDrag) return;
+      rcDrag = { stream, shift, x, y, moved: false };
+      dropZone = null;
+      dropShield = document.createElement("div");
+      dropShield.style.cssText = "position:fixed;inset:0;z-index:2147483646;cursor:copy";
+      document.body.append(dropShield);
+      document.addEventListener("pointermove", onDragMove);
+      document.addEventListener("pointerup", onDragUp);
+      document.addEventListener("pointercancel", cancelDrag);
+      document.addEventListener("keydown", onDragKey);
+      window.addEventListener("blur", cancelDrag);
+      document.addEventListener("contextmenu", swallowMenu, true);
+      schedule();
+    }
+    function cancelDrag() {
+      if (!rcDrag) return;
+      endRightDrag();
+      schedule();
+    }
+    function onDragKey(e) {
+      if (e.key === "Escape") cancelDrag();
+    }
+    function endRightDrag() {
+      document.removeEventListener("pointermove", onDragMove);
+      document.removeEventListener("pointerup", onDragUp);
+      document.removeEventListener("pointercancel", cancelDrag);
+      document.removeEventListener("keydown", onDragKey);
+      window.removeEventListener("blur", cancelDrag);
+      dropShield?.remove();
+      dropShield = null;
+      rcDrag = null;
+      dropZone = null;
+      setTimeout(() => document.removeEventListener("contextmenu", swallowMenu, true), MENU_GRACE_MS);
+    }
+    function onDragMove(e) {
+      if (!rcDrag) return;
+      if (Math.abs(e.clientX - rcDrag.x) + Math.abs(e.clientY - rcDrag.y) > DRAG_SLOP) rcDrag.moved = true;
+      const next = chatVisible && chatRegion ? zoneAt(e.clientX, e.clientY, chatRegion, paneBoxes) : null;
+      if (sameZone(next, dropZone)) return;
+      dropZone = next;
+      schedule();
+    }
+    function onDragUp(e) {
+      finishRightDrag(e.clientX, e.clientY);
+    }
+    function finishRightDrag(x, y) {
+      const drag = rcDrag;
+      if (!drag) return;
+      const zone = chatVisible && chatRegion ? zoneAt(x, y, chatRegion, paneBoxes) : null;
+      endRightDrag();
+      preview = -1;
+      const done = drag.moved && zone ? applyDrop(zone, drag.stream) : drag.shift ? togglePane(drag.stream) : switchPane(drag.stream);
+      if (done) showToast(done, x, y);
+      schedule();
     }
     function togglePane(index) {
       if (index === masterChat) masterChatAuto = false;
       if (!chatVisible) {
         chatVisible = true;
-        if (!panes.includes(index)) panes.push(index);
+        if (!leafOfStream(index)) addPane(index);
         return "➕💬";
       }
-      if (panes.includes(index)) {
-        const rest = panes.filter((i) => i !== index);
-        if (rest.length === 0) {
-          chatVisible = false;
-          return "➖💬";
+      const held = leafOfStream(index);
+      if (held) return closePane(held.id);
+      return addPane(index) ? "➕💬" : null;
+    }
+    function applyDrop(zone, stream) {
+      chatVisible = true;
+      const held = leafOfStream(stream);
+      if (zone.kind === "center") {
+        const target = findLeaf(tree, zone.id);
+        if (!target || held?.id === target.id) return null;
+        if (held) swapStreams(held, target);
+        else {
+          if (target.stream === masterChat) masterChat = -1;
+          target.stream = stream;
         }
-        if (index === masterChat) masterChat = -1;
-        panes = rest;
-        return "➖💬";
+        return "🔄💬";
       }
-      if (!paneRoom(panes.length + 1)) return null;
-      panes.push(index);
+      if (held && zone.kind === "pane" && zone.id === held.id) return null;
+      let base = tree;
+      if (held) {
+        if (leaves(base).length === 1) return null;
+        base = remove(base, held.id);
+      }
+      const next = zone.kind === "edge" ? wrap(base, zone.side, stream) : insert(base, zone.id, zone.side, stream);
+      if (chatRegion && !fits(next, chatRegion, TILE_GAP, MIN_PANE_WIDTH, MIN_PANE_HEIGHT)) return null;
+      if (held && held.stream === masterChat) masterChat = -1;
+      tree = next;
       return "➕💬";
     }
     function resetOrder() {
@@ -1305,22 +1658,28 @@ html.mlpp-swap .mlpp-tile:hover { border-color: #7aa2f7 !important; }
       const parked = { x: W - cw, y: SELECT_HEIGHT, w: cw, h: Math.max(1, H - SELECT_HEIGHT) };
       const region = columns ? null : layout.chats[0] ?? null;
       chatRegion = region;
-      let visible = columns ? chats.usable : chatVisible ? visiblePanes() : [];
       const slots = /* @__PURE__ */ new Map();
+      const visible = [];
+      paneBoxes = /* @__PURE__ */ new Map();
       if (columns) {
+        visible.push(...chats.usable);
         layout.chats.forEach((r, slot) => {
           const stream = slotStream[slot];
           if (visible.includes(stream)) slots.set(stream, r);
         });
-      } else if (visible.length > 0 && region) {
-        let rects = null;
-        while (visible.length > 1 && !(rects = splitChatPanes(region, visible.length, MIN_PANE_WIDTH, MIN_PANE_HEIGHT, gap))) {
-          visible = visible.slice(0, -1);
+      } else if (chatVisible && region) {
+        const shown = trimToFit(tree, region, gap, MIN_PANE_WIDTH, MIN_PANE_HEIGHT);
+        paneBoxes = rects(shown, region, gap);
+        const list = leaves(shown);
+        const newest = list.reduce((best, l) => l.id > best.id ? l : best, list[0]);
+        const peek = preview >= 0 && get("chatHoverPreview") !== 0 && !list.some((l) => l.stream === preview) ? preview : -1;
+        for (const leafNode of list) {
+          const stream = peek >= 0 && leafNode.id === newest.id ? peek : leafNode.stream;
+          const r = paneBoxes.get(leafNode.id);
+          if (!r || !chats.usable.includes(stream) || slots.has(stream)) continue;
+          slots.set(stream, r);
+          visible.push(stream);
         }
-        if (!rects) rects = [region];
-        visible.forEach((stream, i) => {
-          if (rects[i]) slots.set(stream, rects[i]);
-        });
       }
       const current = visible[0] ?? -1;
       const states = chats.sync(visible, get("chatLimit"));
@@ -1351,10 +1710,15 @@ html.mlpp-swap .mlpp-tile:hover { border-color: #7aa2f7 !important; }
       if (current >= 0 && hooks.chatSelect.selectedIndex !== current) hooks.chatSelect.selectedIndex = current;
       if (columns || !chatVisible) rules.push("#mlpp-resizer { display: none !important; }");
       else if (layout.resizer) rules.push(place("#mlpp-resizer", layout.resizer, "display: block !important;"));
+      if (rcDrag && region && chatVisible) {
+        rules.push(place("#mlpp-dropbg", region, "display: block !important;"));
+        const box = dropZone ? previewRect(dropZone, region, paneBoxes) : null;
+        if (box) rules.push(place("#mlpp-drop", box, "display: block !important;"));
+      }
       rules.push(`#chat-toggle .open { display: ${chatVisible ? "none" : "inline"} !important; }`);
       rules.push(`#chat-toggle .close { display: ${chatVisible ? "inline" : "none"} !important; }`);
       setStyle("layout", rules.join("\n"));
-      document.documentElement.dataset.mlppLayout = `mode=${layout.mode} master=${master} chat=${visible.join("+") || -1} panes=[${panes.join(",")}] mchat=${masterChat}${masterChatAuto ? "(auto)" : ""} slots=[${slotStream.join(",")}] grid=${forceCols}x${forceRows} setting=${mode2} stack=${stackPlacement()}`;
+      document.documentElement.dataset.mlppLayout = `mode=${layout.mode} master=${master} chat=${visible.join("+") || -1} panes=[${leaves(tree).map((l) => l.stream).join(",")}] mchat=${masterChat}${masterChatAuto ? "(auto)" : ""} slots=[${slotStream.join(",")}] grid=${forceCols}x${forceRows} setting=${mode2} stack=${stackPlacement()}`;
       dnd.update(layout.videos);
       const byStream = /* @__PURE__ */ new Map();
       layout.videos.forEach((r, slot) => byStream.set(slotStream[slot], r));
@@ -1372,9 +1736,10 @@ html.mlpp-swap .mlpp-tile:hover { border-color: #7aa2f7 !important; }
         e.stopPropagation();
         if (hooks.chatSelect.value === "about:blank") {
           chatVisible = false;
-          if (panes[0] >= 0) hooks.chatSelect.selectedIndex = panes[0];
         } else {
-          panes = [hooks.chatSelect.selectedIndex];
+          tree = leaf(hooks.chatSelect.selectedIndex);
+          masterChat = -1;
+          masterChatAuto = false;
           preview = -1;
           chatVisible = true;
         }
@@ -1432,6 +1797,10 @@ html.mlpp-swap .mlpp-tile:hover { border-color: #7aa2f7 !important; }
       schedule();
     });
     bus.on((index, data) => {
+      if (data.kind === "alt") {
+        dnd.setFrameAlt(index, !!data.on);
+        return;
+      }
       if (data.kind === "master") {
         master = master === index ? -1 : index;
         if (master >= 0) {
@@ -1455,12 +1824,22 @@ html.mlpp-swap .mlpp-tile:hover { border-color: #7aa2f7 !important; }
           preview = -1;
         }
         schedule();
-      } else if (data.kind === "commit") {
-        preview = -1;
-        const done = data.shift ? togglePane(index) : switchPane(index);
-        if (done) toastAt(index, data, done);
-        schedule();
+      } else if (data.kind === "rcdown") {
+        const at = docPoint(index, data);
+        if (at) startRightDrag(index, !!data.shift, at.x, at.y);
+      } else if (data.kind === "rcup") {
+        const at = docPoint(index, data);
+        if (at) finishRightDrag(at.x, at.y);
       }
+    });
+    chats.onMessage((index, data) => {
+      if (data.kind !== "close") return;
+      const held = leafOfStream(index);
+      if (!held) return;
+      const box = paneBoxes.get(held.id);
+      const done = closePane(held.id);
+      if (done && box) showToast(done, box.x + box.w / 2, box.y + box.h / 2);
+      schedule();
     });
     window.addEventListener("resize", schedule);
     onChange(schedule);
@@ -1972,13 +2351,36 @@ html.mlpp-swap .mlpp-tile:hover { border-color: #7aa2f7 !important; }
       hovering = on;
       report({ kind: "hover", on });
     }
+    let alting = false;
+    function setAlt(on) {
+      if (alting === on) return;
+      alting = on;
+      report({ kind: "alt", on });
+    }
     const root = document.documentElement;
-    root.addEventListener("mouseenter", () => setHover(true));
-    root.addEventListener("mousemove", () => setHover(true));
-    root.addEventListener("mouseleave", () => setHover(false));
-    window.addEventListener("blur", () => setHover(false));
+    root.addEventListener("mouseenter", (e) => {
+      setHover(true);
+      setAlt(e.altKey);
+    });
+    root.addEventListener("mousemove", (e) => {
+      setHover(true);
+      setAlt(e.altKey);
+    });
+    root.addEventListener("mouseleave", () => {
+      setHover(false);
+      setAlt(false);
+    });
+    window.addEventListener("keydown", (e) => setAlt(e.altKey || e.key === "Alt"));
+    window.addEventListener("keyup", (e) => setAlt(e.key === "Alt" ? false : e.altKey));
+    window.addEventListener("blur", () => {
+      setHover(false);
+      setAlt(false);
+    });
     document.addEventListener("visibilitychange", () => {
-      if (document.hidden) setHover(false);
+      if (document.hidden) {
+        setHover(false);
+        setAlt(false);
+      }
     });
     window.addEventListener(
       "click",
@@ -1991,12 +2393,31 @@ html.mlpp-swap .mlpp-tile:hover { border-color: #7aa2f7 !important; }
       true
     );
     window.addEventListener(
+      "mousedown",
+      (e) => {
+        if (e.button !== 2 || !parentOrigin || !inCenter(e)) return;
+        e.stopPropagation();
+        e.preventDefault();
+        report({ kind: "rcdown", shift: e.shiftKey, x: e.clientX, y: e.clientY });
+      },
+      true
+    );
+    window.addEventListener(
+      "mouseup",
+      (e) => {
+        if (e.button !== 2 || !parentOrigin || !inCenter(e)) return;
+        e.stopPropagation();
+        e.preventDefault();
+        report({ kind: "rcup", x: e.clientX, y: e.clientY });
+      },
+      true
+    );
+    window.addEventListener(
       "contextmenu",
       (e) => {
         if (!parentOrigin || !inCenter(e)) return;
         e.stopPropagation();
         e.preventDefault();
-        report({ kind: "commit", shift: e.shiftKey, x: e.clientX, y: e.clientY });
       },
       true
     );
@@ -2020,6 +2441,32 @@ html.mlpp-swap .mlpp-tile:hover { border-color: #7aa2f7 !important; }
       true
     );
     window.parent.postMessage({ mlpp: true, kind: "agent" }, "*");
+  }
+
+  // src/chat-agent.js
+  var PARENT_ORIGIN2 = /^https:\/\/(www\.)?mul\.live$/;
+  var parentOrigin2 = null;
+  function startChatAgent() {
+    if (window.top === window) return;
+    window.addEventListener("message", (e) => {
+      if (!PARENT_ORIGIN2.test(e.origin)) return;
+      const data = (
+        /** @type {{ mlpp?: unknown, kind?: string } | null} */
+        e.data
+      );
+      if (data && data.mlpp === true && data.kind === "hello") parentOrigin2 = e.origin;
+    });
+    window.addEventListener(
+      "contextmenu",
+      (e) => {
+        if (!e.shiftKey || !parentOrigin2) return;
+        e.preventDefault();
+        e.stopPropagation();
+        window.parent.postMessage({ mlpp: true, kind: "close" }, parentOrigin2);
+      },
+      true
+    );
+    window.parent.postMessage({ mlpp: true, kind: "chatagent" }, "*");
   }
 
   // src/ready.js
@@ -2076,7 +2523,8 @@ html.mlpp-swap .mlpp-tile:hover { border-color: #7aa2f7 !important; }
   var SOOP_HOST = /^play\.sooplive\.(com|co\.kr)$/;
   var SOOP_CHAT = /^https:\/\/play\.sooplive\.(com|co\.kr)\//;
   if (SOOP_HOST.test(location.hostname)) {
-    startPlayerAgent();
+    if (/vtype=chat/.test(location.search)) startChatAgent();
+    else startPlayerAgent();
   } else {
     watchPlayers();
     let cspReports = 0;
