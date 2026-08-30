@@ -67,20 +67,46 @@ function mainVideo() {
   return videos.find((v) => v.videoWidth > 400) ?? videos[0] ?? null;
 }
 
+/**
+ * 소리에서 국소 peak을 잡는다.
+ *
+ * 지수이동평균으로 기준선을 따라가고, 순간 크기가 그 기준선을 일정 배수 이상 넘을 때만
+ * 한 발 보고한다. 절대 임계값을 쓰면 조용한 방송은 영영 안 뛰고 시끄러운 방송은 계속 뛴다.
+ * 기준선이 따라가므로 방송마다 알아서 맞는다.
+ */
+const AVG_DECAY = 0.9;
+/**
+ * 기준선 대비 이 배수를 넘어야 peak으로 본다.
+ * 1.5로 두면 이미 시끄러운 방송에서 기준선이 높아져 말소리를 거의 못 잡는다(12초에 4발).
+ * 1.35면 조용한 방송(17발)과 시끄러운 방송(19발)이 비슷해지고 무음은 여전히 0발이다.
+ */
+const PEAK_RATIO = 1.35;
+/** 이만큼은 넘어야 한다. 무음 구간에서 기준선이 0에 붙었을 때 잡음에 뛰는 것을 막는다. */
+const PEAK_FLOOR = 0.06;
+/** 한 발 쏜 뒤 쉬는 시간 */
+const REFRACTORY_MS = 140;
+
+let avg = 0;
+
 function measure() {
   if (!analysing) return;
   requestAnimationFrame(measure);
   if (!analyser || !buffer) return;
-  const now = performance.now();
-  if (now - lastSent < 60) return; // 초당 약 16번이면 눈에는 충분하다
-  lastSent = now;
+
   analyser.getByteTimeDomainData(buffer);
   let peak = 0;
   for (const v of buffer) {
     const d = Math.abs(v - 128);
     if (d > peak) peak = d;
   }
-  report({ kind: 'level', level: Math.min(1, peak / 80) });
+  const level = Math.min(1, peak / 80);
+  avg = avg * AVG_DECAY + level * (1 - AVG_DECAY);
+
+  const now = performance.now();
+  if (level > avg * PEAK_RATIO + PEAK_FLOOR && now - lastSent > REFRACTORY_MS) {
+    lastSent = now;
+    report({ kind: 'beat', strength: Math.min(1, (level - avg) / 0.4) });
+  }
 }
 
 function startAnalyser() {
@@ -109,8 +135,8 @@ function startAnalyser() {
 
 function stopAnalyser() {
   analysing = false;
+  avg = 0;
   // 그래프는 그대로 둔다. AudioContext 를 닫으면 소리가 끊긴다.
-  report({ kind: 'level', level: 0 });
 }
 
 export function startPlayerAgent() {

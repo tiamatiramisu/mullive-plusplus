@@ -15,6 +15,10 @@ import * as settings from './settings.js';
 
 const SOLO_GLOW = 'rgba(76, 141, 255, 0.5)';
 const MUTED_GLOW = 'rgba(255, 77, 77, 0.45)';
+/** 실제 소리를 안 쓸 때 파동을 쏘는 주기 */
+const PULSE_PERIOD_MS = 1500;
+/** 타일마다 조금씩 어긋나게 쏴서 한 덩어리로 튀지 않게 한다. */
+const PULSE_STAGGER_MS = 170;
 
 // 기본 규칙의 특정도를 개별 규칙(#mlpp-audio-N, 특정도 1,0,0)보다 낮게 유지해야 한다.
 // `#mlpp-chats .mlpp-audio`(1,1,0)로 쓰면 !important끼리 붙어도 기본 규칙이 이겨 영영 안 보인다.
@@ -43,11 +47,13 @@ const BASE_CSS = `
   pointer-events: none !important;
   box-shadow: 0 0 14px 3px var(--mlpp-glow, transparent) !important;
 }
-/* 파형처럼 천천히 일렁인다. CSS 애니메이션이라 프레임마다 드는 비용이 없다. */
-.mlpp-audio.mlpp-wave { animation: mlpp-wave 2.4s ease-in-out infinite !important; }
-@keyframes mlpp-wave {
-  0%, 100% { box-shadow: 0 0 10px 2px var(--mlpp-glow); }
-  50% { box-shadow: 0 0 30px 7px var(--mlpp-glow); }
+/* 파동은 별도 자식이 맡는다. 바탕 글로우와 box-shadow 가 서로 덮어쓰지 않게 하려는 것이다.
+   peak 순간마다 한 발씩 쏘고, 애니메이션이 끝나면 사라진다. */
+.mlpp-ripple {
+  position: absolute !important;
+  inset: 0 !important;
+  opacity: 0 !important;
+  pointer-events: none !important;
 }
 `;
 
@@ -70,8 +76,12 @@ export function createAudioMixer({ players, root, bus }) {
   const sent = new Map();
   /** @type {Set<number>} 에이전트가 응답한 프레임. 진단용. */
   const agents = new Set();
-  /** @type {Map<number, number>} 프레임이 보고한 소리 크기 0~1 */
-  const levels = new Map();
+  /** @type {Map<number, string>} 지금 이 타일에 쓰는 글로우 색 */
+  const colors = new Map();
+  /** @type {number[]} 지금 하이라이트가 보이는 타일들 */
+  let shown = [];
+  /** @type {ReturnType<typeof setInterval> | 0} */
+  let pulseTimer = 0;
 
   /** 지금 들려야 하는 스트림 집합. 비어 있으면 "전부 들림"이다. */
   function active() {
@@ -87,24 +97,45 @@ export function createAudioMixer({ players, root, bus }) {
     const el = document.createElement('div');
     el.id = `mlpp-audio-${index}`;
     el.className = 'mlpp-audio';
+    const ripple = document.createElement('div');
+    ripple.className = 'mlpp-ripple';
+    el.append(ripple);
     root.append(el);
     overlays.set(index, el);
     return el;
   }
 
   /**
-   * 소리 크기를 글로우 세기에 반영한다. 전체를 다시 그리지 않고 인라인 값만 바꾼다.
+   * 파동을 한 발 쏜다. 선 하나가 타일 밖으로 퍼져나가며 사라진다.
+   * 전체를 다시 그리지 않고 그 타일의 자식 하나만 애니메이션한다.
    * @param {number} index
+   * @param {number} strength 0~1
    */
-  function applyLevel(index) {
+  function ripple(index, strength) {
     const el = overlays.get(index);
-    if (!el) return;
-    const level = levels.get(index) ?? 0;
-    el.style.setProperty(
-      'box-shadow',
-      `0 0 ${Math.round(10 + level * 30)}px ${Math.round(2 + level * 7)}px var(--mlpp-glow)`,
-      'important',
+    const node = el?.querySelector('.mlpp-ripple');
+    const color = colors.get(index);
+    if (!node || !color || !shown.includes(index)) return;
+    const spread = Math.round(10 + strength * 22);
+    node.animate(
+      [
+        { boxShadow: `0 0 1px 0px ${color}`, opacity: 0.95 },
+        { boxShadow: `0 0 6px ${spread}px ${color}`, opacity: 0 },
+      ],
+      { duration: 620, easing: 'cubic-bezier(0.2, 0.65, 0.3, 1)' },
     );
+  }
+
+  /** 실제 소리를 안 쓸 때는 일정 주기로 파동을 보낸다. */
+  function retimePulses() {
+    if (pulseTimer) {
+      clearInterval(pulseTimer);
+      pulseTimer = 0;
+    }
+    if (settings.get('glowPulse') === 0 || settings.get('glowFromAudio') !== 0) return;
+    pulseTimer = setInterval(() => {
+      shown.forEach((index, i) => setTimeout(() => ripple(index, 0.55), i * PULSE_STAGGER_MS));
+    }, PULSE_PERIOD_MS);
   }
 
   /** 실제 소리 반영 여부를 각 프레임에 알린다. */
@@ -116,7 +147,6 @@ export function createAudioMixer({ players, root, bus }) {
   function apply() {
     const set = active();
     const soloing = set.size > 0;
-    const wave = settings.get('glowPulse') !== 0;
     const fromAudio = settings.get('glowFromAudio') !== 0;
 
     players.forEach((_, index) => {
@@ -132,6 +162,8 @@ export function createAudioMixer({ players, root, bus }) {
     const hoveredKind = hovered < 0 ? null : set.has(hovered) ? 'solo' : 'muted';
 
     const rules = [BASE_CSS];
+    /** @type {number[]} */
+    const next = [];
     for (const [index, r] of rects) {
       const el = ensureOverlay(index);
       const kind = set.has(index) ? 'solo' : 'muted';
@@ -140,17 +172,14 @@ export function createAudioMixer({ players, root, bus }) {
         continue;
       }
       const glow = kind === 'solo' ? SOLO_GLOW : MUTED_GLOW;
-      // 타일마다 위상을 어긋나게 해 한 덩어리로 깜빡이지 않게 한다.
+      colors.set(index, glow);
+      next.push(index);
       rules.push(
         `#${el.id} { display: block !important; left: ${r.x}px !important; top: ${r.y}px !important;` +
-          ` width: ${r.w}px !important; height: ${r.h}px !important;` +
-          ` --mlpp-glow: ${glow} !important; animation-delay: -${(index * 0.43).toFixed(2)}s !important; }`,
+          ` width: ${r.w}px !important; height: ${r.h}px !important; --mlpp-glow: ${glow} !important; }`,
       );
-      // 소리에 맞추는 동안에는 CSS 애니메이션 대신 인라인으로 세기를 직접 준다.
-      el.classList.toggle('mlpp-wave', wave && !fromAudio);
-      if (fromAudio) applyLevel(index);
-      else el.style.removeProperty('box-shadow');
     }
+    shown = next;
     setStyle('audio', rules.join('\n'));
     // 밖에서 상태를 읽을 수 있게 남긴다. 프레임 사이를 오가는 기능이라 눈으로만 보면 진단이 어렵다.
     document.documentElement.dataset.mlppAudio =
@@ -173,9 +202,9 @@ export function createAudioMixer({ players, root, bus }) {
         bus.send(index, { kind: 'analyse', on: settings.get('glowFromAudio') !== 0 });
         apply();
         break;
-      case 'level':
-        levels.set(index, Math.max(0, Math.min(1, Number(data.level) || 0)));
-        if (settings.get('glowFromAudio')) applyLevel(index);
+      case 'beat':
+        // 프레임이 소리에서 peak을 잡아 보낸 순간이다.
+        if (settings.get('glowPulse') !== 0) ripple(index, Math.max(0, Math.min(1, Number(data.strength) || 0)));
         break;
       case 'hover':
         if (data.on) hovered = index;
@@ -192,8 +221,10 @@ export function createAudioMixer({ players, root, bus }) {
 
   settings.onChange(() => {
     syncAnalysers();
+    retimePulses();
     apply();
   });
+  retimePulses();
 
   return {
     /** 플레이어가 준비되면 부른다. 에이전트가 먼저 올라와 있을 수도 있어 양쪽에서 인사한다. */
