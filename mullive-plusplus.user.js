@@ -4,7 +4,7 @@
 // @name:en      Mul.Live Multiview Enhancer
 // @name:ja-JP   Mul.Live マルチビュー強化
 // @namespace    http://tampermonkey.net/
-// @version      0.18.0
+// @version      0.19.0
 // @license      MIT
 // @description       Resizable chat panel, background-persistent chats, smarter video grid layout and drag-to-swap tiles for Mul.Live.
 // @description:en    Resizable chat panel, background-persistent chats, smarter video grid layout and drag-to-swap tiles for Mul.Live.
@@ -198,12 +198,28 @@
     },
     { key: "gridRows", name: "수동 격자 — 행 수", tab: "레이아웃", type: "int", value: 0, min: 0, max: 12, help: "방송 수에 필요한 행보다 크면 빈 칸이 남는다." },
     {
+      key: "chatHoverPreview",
+      name: "호버로 미리 확인",
+      tab: "채팅",
+      type: "bool",
+      value: 1,
+      help: "영상에 마우스를 올리면 사이드 채팅이 그 방송으로 잠깐 바뀐다. 떼면 원래대로 돌아온다."
+    },
+    {
       key: "masterFollowsChat",
       name: "마스터 전환시 채팅도 전환",
       tab: "채팅",
       type: "bool",
       value: 1,
       help: "휠클릭으로 마스터를 바꾸면 사이드 채팅도 그 방송으로 넘어간다."
+    },
+    {
+      key: "audioHoverPreview",
+      name: "호버로 미리 확인",
+      tab: "사운드",
+      type: "bool",
+      value: 1,
+      help: "영상에 마우스를 올리면 그 방송이 잠깐 들린다. 떼면 원래 솔로 조합으로 돌아온다."
     },
     {
       key: "masterFollowsAudio",
@@ -215,19 +231,20 @@
     },
     {
       key: "glowPulse",
-      name: "하이라이트 일렁임",
+      name: "선택된 영상 시각화",
       tab: "사운드",
       type: "bool",
       value: 1,
-      help: "들리는 화면의 테두리가 소리에 맞춰 밝아졌다 사라진다. 끄면 아무 표시도 하지 않는다."
+      help: "현재 듣고 있는 영상 테두리에 깜빡이는 테두리를 보여줍니다."
     },
     {
       key: "glowFromAudio",
       name: "실제 소리에 반응",
       tab: "사운드",
       type: "bool",
-      value: 0,
-      help: "일렁임을 실제 소리 크기에 맞춘다. 플레이어 오디오를 Web Audio 그래프로 통과시키므로, 소리가 이상하면 끄고 새로고침한다."
+      value: 1,
+      indent: true,
+      help: "깜빡임이 실제 소리를 반영합니다. 렉이 걸린다면 비활성화 해주세요."
     },
     {
       key: "chatStagger",
@@ -469,7 +486,7 @@
     let pulseTimer = 0;
     function active() {
       const set2 = new Set(pinned);
-      if (hovered >= 0) set2.add(hovered);
+      if (hovered >= 0 && get("audioHoverPreview") !== 0) set2.add(hovered);
       return set2;
     }
     function ensureOverlay(index) {
@@ -1017,7 +1034,7 @@ html.mlpp-swap .mlpp-tile:hover { border-color: #7aa2f7 !important; }
     let chatVisible = true;
     let committed = chats.firstUsable();
     let preview = -1;
-    const activeChat = () => preview >= 0 ? preview : committed;
+    const activeChat = () => preview >= 0 && get("chatHoverPreview") !== 0 ? preview : committed;
     let master = -1;
     let ignoreHoverUntil = 0;
     let slotStream = (
@@ -1331,6 +1348,12 @@ html.mlpp-swap .mlpp-tile:hover { border-color: #7aa2f7 !important; }
   line-height: 1.5 !important;
 }
 #mlpp-panel .mlpp-row { margin-bottom: 12px !important; }
+/* 바로 위 항목에 딸린 하위 설정. 세로줄로 소속을 보인다. */
+#mlpp-panel .mlpp-row.mlpp-sub {
+  margin-top: -4px !important;
+  padding-left: 12px !important;
+  border-left: 2px solid #2c2d31 !important;
+}
 #mlpp-panel .mlpp-label {
   display: flex !important;
   align-items: center !important;
@@ -1444,7 +1467,7 @@ html.mlpp-swap .mlpp-tile:hover { border-color: #7aa2f7 !important; }
       };
       var commit = commit2;
       const row = document.createElement("div");
-      row.className = "mlpp-row";
+      row.className = field.indent ? "mlpp-row mlpp-sub" : "mlpp-row";
       const label = document.createElement("div");
       label.className = "mlpp-label";
       const name = document.createElement("span");
@@ -1572,6 +1595,10 @@ html.mlpp-swap .mlpp-tile:hover { border-color: #7aa2f7 !important; }
     /** @type {AnalyserNode | null} */
     null
   );
+  var ctx = (
+    /** @type {AudioContext | null} */
+    null
+  );
   var buffer = (
     /** @type {Uint8Array<ArrayBuffer> | null} */
     null
@@ -1606,11 +1633,16 @@ html.mlpp-swap .mlpp-tile:hover { border-color: #7aa2f7 !important; }
       report({ kind: "beat", strength: Math.min(1, (level - avg) / 0.4) });
     }
   }
+  function wake() {
+    ctx?.resume().catch(() => {
+    });
+  }
   function startAnalyser() {
     analysing = true;
     if (analyser) {
       requestAnimationFrame(measure);
-      report({ kind: "analyser", ok: true });
+      wake();
+      report({ kind: "analyser", ok: ctx?.state === "running" });
       return;
     }
     const video = mainVideo();
@@ -1621,15 +1653,19 @@ html.mlpp-swap .mlpp-tile:hover { border-color: #7aa2f7 !important; }
       return;
     }
     try {
-      const ctx = new AudioContext();
+      ctx = new AudioContext();
       const source = ctx.createMediaElementSource(video);
       analyser = ctx.createAnalyser();
       analyser.fftSize = 256;
       source.connect(analyser);
       analyser.connect(ctx.destination);
       buffer = new Uint8Array(analyser.fftSize);
-      ctx.resume();
-      report({ kind: "analyser", ok: true });
+      ctx.addEventListener("statechange", () => report({ kind: "analyser", ok: ctx?.state === "running" }));
+      for (const type of ["pointerdown", "keydown"]) {
+        window.addEventListener(type, wake, { capture: true });
+      }
+      wake();
+      report({ kind: "analyser", ok: ctx.state === "running" });
     } catch {
       analyser = null;
       buffer = null;
