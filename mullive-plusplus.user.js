@@ -4,7 +4,7 @@
 // @name:en      Mul.Live Multiview Enhancer
 // @name:ja-JP   Mul.Live マルチビュー強化
 // @namespace    http://tampermonkey.net/
-// @version      0.24.1
+// @version      0.25.0
 // @license      MIT
 // @description       Resizable chat panel, background-persistent chats, smarter video grid layout and drag-to-swap tiles for Mul.Live.
 // @description:en    Resizable chat panel, background-persistent chats, smarter video grid layout and drag-to-swap tiles for Mul.Live.
@@ -21,6 +21,7 @@
 // @grant        GM_addStyle
 // @grant        GM_setValue
 // @grant        GM_getValue
+// @grant        GM_setClipboard
 // ==/UserScript==
 
 "use strict";
@@ -184,7 +185,8 @@
         rule: true
       }
     ],
-    사운드: [{ label: "솔로 지정", text: "플레이어에 좌클릭해서 듣고 싶은 영상들을 지정할 수 있어요." }]
+    사운드: [{ label: "솔로 지정", text: "플레이어에 좌클릭해서 듣고 싶은 영상들을 지정할 수 있어요." }],
+    고급: [{ label: "레이아웃 공유", text: "주소를 복사하면 방송 조합과 배치가 같이 전달됩니다." }]
   };
   var GROUP_HELP = {
     "수동 격자": "0이면 자동. 지정하면 열 모드는 적용되지 않고 사이드 채팅이 된다. 행이 방송 수보다 많으면 빈 칸이 남는다."
@@ -258,6 +260,16 @@
       value: 1,
       indent: true,
       help: "깜빡임이 실제 소리를 반영합니다. 렉이 걸린다면 비활성화 해주세요."
+    },
+    {
+      key: "urlSync",
+      name: "주소에 배치 기록",
+      tab: "고급",
+      type: "enum",
+      inline: true,
+      options: ["자동 기록", "내보낼 때만"],
+      value: 0,
+      help: "자동 기록이면 배치를 바꿀 때마다 주소창이 갱신된다. 히스토리에는 쌓이지 않으므로 뒤로 가기가 어지러워지지 않는다. 어느 쪽이든 주소에 실린 배치는 열 때 그대로 복원한다."
     },
     {
       key: "chatStagger",
@@ -1264,6 +1276,118 @@ html.mlpp-swap .mlpp-tile:hover { border-color: rgba(255, 255, 255, 0.7) !import
     };
   }
 
+  // src/share.js
+  var MODES = (
+    /** @type {const} */
+    ["auto", "columns", "side"]
+  );
+  var ch = (n) => n.toString(36);
+  function num(c) {
+    if (!/^[0-9a-z]$/.test(c)) return -1;
+    return parseInt(c, 36);
+  }
+  function encodeTree(node) {
+    if (isLeaf(node)) return ch(node.stream);
+    return `${node.dir}(${encodeTree(node.a)},${encodeTree(node.b)})`;
+  }
+  function decodeTree(text, count) {
+    let i = 0;
+    function parse() {
+      const c = text[i];
+      if (c === "v" || c === "h") {
+        if (text[i + 1] !== "(") return null;
+        i += 2;
+        const a = parse();
+        if (!a || text[i] !== ",") return null;
+        i += 1;
+        const b = parse();
+        if (!b || text[i] !== ")") return null;
+        i += 1;
+        return { dir: c, a, b };
+      }
+      const n = num(c ?? "");
+      if (n < 0 || n >= count) return null;
+      i += 1;
+      return leaf(n);
+    }
+    const root = parse();
+    if (!root || i !== text.length) return null;
+    const streams = leaves(root).map((l) => l.stream);
+    return new Set(streams).size === streams.length ? root : null;
+  }
+  function encode(state) {
+    const parts = ["mlpp=1", `l=${state.mode[0]}`];
+    if (state.cols > 0 || state.rows > 0) parts.push(`g=${ch(state.cols)}x${ch(state.rows)}`);
+    parts.push(`w=${ch(Math.round(state.chatWidth))}`);
+    if (state.master >= 0) parts.push(`m=${ch(state.master)}`);
+    if (!state.order.every((v, i) => v === i)) parts.push(`o=${state.order.map(ch).join("")}`);
+    parts.push(`p=${encodeTree(state.tree)}`);
+    return parts.join(";");
+  }
+  function decode(hash, count) {
+    const text = hash.replace(/^#/, "");
+    if (!text.startsWith("mlpp=")) return null;
+    const map = /* @__PURE__ */ new Map();
+    for (const part of text.split(";")) {
+      const eq = part.indexOf("=");
+      if (eq < 0) return null;
+      map.set(part.slice(0, eq), part.slice(eq + 1));
+    }
+    if (map.get("mlpp") !== "1") return null;
+    const mode2 = MODES.find((m) => m[0] === map.get("l"));
+    if (!mode2) return null;
+    let cols = 0;
+    let rows = 0;
+    const grid = map.get("g");
+    if (grid !== void 0) {
+      const m = /^([0-9a-z])x([0-9a-z])$/.exec(grid);
+      if (!m) return null;
+      cols = num(m[1]);
+      rows = num(m[2]);
+      if (cols < 0 || rows < 0) return null;
+    }
+    let chatWidth = 0;
+    const rawWidth = map.get("w");
+    if (rawWidth !== void 0) {
+      chatWidth = Number.parseInt(rawWidth, 36);
+      if (!Number.isFinite(chatWidth) || chatWidth <= 0 || chatWidth > 1e4) return null;
+    }
+    let master = -1;
+    const rawMaster = map.get("m");
+    if (rawMaster !== void 0) {
+      if (rawMaster.length !== 1) return null;
+      master = num(rawMaster);
+      if (master < 0 || master >= count) return null;
+    }
+    let order = Array.from({ length: count }, (_, i) => i);
+    const rawOrder = map.get("o");
+    if (rawOrder !== void 0) {
+      if (rawOrder.length !== count) return null;
+      order = [...rawOrder].map(num);
+      if (order.some((v) => v < 0 || v >= count) || new Set(order).size !== count) return null;
+    }
+    const rawTree = map.get("p");
+    if (rawTree === void 0) return null;
+    const tree = decodeTree(rawTree, count);
+    if (!tree) return null;
+    return { mode: mode2, cols, rows, chatWidth, master, order, tree };
+  }
+  async function copyText(text) {
+    try {
+      if (typeof GM_setClipboard === "function") {
+        GM_setClipboard(text, "text");
+        return true;
+      }
+    } catch {
+    }
+    try {
+      await navigator.clipboard.writeText(text);
+      return true;
+    } catch {
+      return false;
+    }
+  }
+
   // src/layout.js
   var RESIZER_WIDTH = 6;
   var SELECT_HEIGHT = 28;
@@ -1726,6 +1850,10 @@ html.mlpp-swap .mlpp-tile:hover { border-color: rgba(255, 255, 255, 0.7) !import
       rules.push(`#chat-toggle .open { display: ${chatVisible ? "none" : "inline"} !important; }`);
       rules.push(`#chat-toggle .close { display: ${chatVisible ? "inline" : "none"} !important; }`);
       setStyle("layout", rules.join("\n"));
+      if (get("urlSync") === 0) {
+        const next = `#${shareHash()}`;
+        if (location.hash !== next) history.replaceState(null, "", location.pathname + location.search + next);
+      }
       document.documentElement.dataset.mlppLayout = `mode=${layout.mode} master=${master} chat=${visible.join("+") || -1} panes=[${leaves(tree).map((l) => l.stream).join(",")}] mchat=${masterChat}${masterChatAuto ? "(auto)" : ""} slots=[${slotStream.join(",")}] grid=${forceCols}x${forceRows} setting=${mode2} stack=${stackPlacement()}`;
       dnd.update(layout.videos);
       const byStream = /* @__PURE__ */ new Map();
@@ -1849,11 +1977,46 @@ html.mlpp-swap .mlpp-tile:hover { border-color: rgba(255, 255, 255, 0.7) !import
       if (done && box) showToast(done, box.x + box.w / 2, box.y + box.h / 2);
       schedule();
     });
+    function shareHash() {
+      return encode({
+        mode: layoutMode(),
+        cols: get("gridCols"),
+        rows: get("gridRows"),
+        chatWidth: chatWidth(),
+        master,
+        order,
+        tree
+      });
+    }
+    function restoreFromHash() {
+      const shared = decode(location.hash, hooks.players.length);
+      if (!shared) return;
+      set("layoutMode", LAYOUT_MODES.indexOf(shared.mode));
+      set("gridCols", shared.cols);
+      set("gridRows", shared.rows);
+      if (shared.chatWidth > 0) set("chatWidth", shared.chatWidth);
+      order = shared.order;
+      saveOrder(orderKey, order);
+      tree = shared.tree;
+      masterChat = -1;
+      masterChatAuto = false;
+      master = shared.master;
+      audio.setMaster(master);
+      chatVisible = true;
+    }
     window.addEventListener("resize", schedule);
     onChange(schedule);
     chats.onFrameLoad(schedule);
+    restoreFromHash();
     render();
-    return { schedule, render, resetOrder, swapHint: dnd.hint };
+    return {
+      schedule,
+      render,
+      resetOrder,
+      swapHint: dnd.hint,
+      /** 지금 배치까지 담은 공유용 주소 */
+      shareUrl: () => `${location.origin}${location.pathname}${location.search}#${shareHash()}`
+    };
   }
 
   // src/panel.js
@@ -2010,6 +2173,19 @@ html.mlpp-swap .mlpp-tile:hover { border-color: rgba(255, 255, 255, 0.7) !import
   cursor: pointer !important;
 }
 #mlpp-panel .mlpp-unit { color: #8a8f98 !important; font-size: 11px !important; }
+/* 탭 안에 놓이는 버튼. 아래쪽 공용 버튼줄과 생김새를 맞춘다. */
+#mlpp-panel .mlpp-tab-actions { display: flex !important; flex-wrap: wrap !important; gap: 6px !important; }
+#mlpp-panel .mlpp-tab-actions button {
+  flex: 1 1 auto !important;
+  padding: 6px 8px !important;
+  border: 1px solid #3a3a3a !important;
+  border-radius: 4px !important;
+  background-color: #26272b !important;
+  color: #e6e6e6 !important;
+  font-size: 12px !important;
+  cursor: pointer !important;
+}
+#mlpp-panel .mlpp-tab-actions button:hover { background-color: #34363b !important; }
 #mlpp-panel .mlpp-actions {
   display: flex !important;
   flex-wrap: wrap !important;
@@ -2175,10 +2351,24 @@ html.mlpp-swap .mlpp-tile:hover { border-color: rgba(255, 255, 255, 0.7) !import
       }
       slotFor(field)?.append(row);
     }
+    for (const name of tabNames) {
+      const mine = actions.filter((a) => a.tab === name);
+      if (mine.length === 0) continue;
+      const row = document.createElement("div");
+      row.className = "mlpp-tab-actions";
+      for (const action of mine) {
+        const button = document.createElement("button");
+        button.type = "button";
+        button.textContent = action.label;
+        button.addEventListener("click", () => action.run());
+        row.append(button);
+      }
+      bodies.get(name)?.append(row);
+    }
     showTab(tabNames[0]);
     const bar = document.createElement("div");
     bar.className = "mlpp-actions";
-    for (const action of [...actions, { label: "설정 초기화", run: () => resetAll() }]) {
+    for (const action of [...actions.filter((a) => !a.tab), { label: "설정 초기화", run: () => resetAll() }]) {
       const button = document.createElement("button");
       button.type = "button";
       button.textContent = action.label;
@@ -2581,7 +2771,15 @@ html.mlpp-swap .mlpp-tile:hover { border-color: rgba(255, 255, 255, 0.7) !import
     });
     createSettingsPanel([
       { label: "영상 순서 초기화", run: () => layout.resetOrder() },
-      { label: "솔로/음소거 해제", run: () => audio.reset() }
+      { label: "솔로/음소거 해제", run: () => audio.reset() },
+      {
+        label: "레이아웃 링크 복사",
+        tab: "고급",
+        run: async () => {
+          const ok = await copyText(layout.shareUrl());
+          showToast(ok ? "링크 복사됨" : "복사 실패", window.innerWidth - 8, 44);
+        }
+      }
     ]);
     log(`v${VERSION} booted`, {
       swap: layout.swapHint,
