@@ -4,7 +4,7 @@
 // @name:en      Mul.Live Multiview Enhancer
 // @name:ja-JP   Mul.Live マルチビュー強化
 // @namespace    http://tampermonkey.net/
-// @version      0.5.0
+// @version      0.5.1
 // @license      MIT
 // @description       Resizable chat panel, background-persistent chats, smarter video grid layout and drag-to-swap tiles for Mul.Live.
 // @description:en    Resizable chat panel, background-persistent chats, smarter video grid layout and drag-to-swap tiles for Mul.Live.
@@ -456,7 +456,7 @@
     return { mode: "columns", videos, chats, resizer: null };
   }
   function sideLayout(n, W, H, gap, chatWidth, resizerWidth, chatVisible, forceCols = 0, forceRows = 0) {
-    const reserved = chatVisible ? chatWidth + resizerWidth : 0;
+    const reserved = chatVisible ? chatWidth : 0;
     const availW = W - reserved;
     const grid = forceCols > 0 ? gridWith(forceCols, Math.max(forceRows, Math.ceil(n / forceCols)), availW, H, gap) : computeGrid(n, availW, H, gap);
     const videos = [];
@@ -476,7 +476,7 @@
       mode: "side",
       videos,
       chats: chatVisible ? [{ x: W - chatWidth, y: 0, w: chatWidth, h: H }] : [],
-      resizer: chatVisible ? { x: W - chatWidth - resizerWidth, y: 0, w: resizerWidth, h: H } : null
+      resizer: chatVisible ? { x: W - chatWidth, y: 0, w: resizerWidth, h: H } : null
     };
   }
 
@@ -812,8 +812,9 @@ html.mlpp-swap .mlpp-tile:hover { border-color: #7aa2f7 !important; }
         const panel = layout.chats[0];
         rules.push("#chat-select { display: block !important; }");
         if (panel) {
-          const w = Math.max(40, panel.w - 8);
-          rules.push(`#chat-select { left: ${panel.x + 4}px !important; top: 4px !important; width: ${w}px !important; }`);
+          const left = panel.x + RESIZER_WIDTH + 2;
+          const w = Math.max(40, panel.w - RESIZER_WIDTH - 6);
+          rules.push(`#chat-select { left: ${left}px !important; top: 4px !important; width: ${w}px !important; }`);
         }
         if (layout.resizer) rules.push(place("#mlpp-resizer", layout.resizer, "display: block !important;"));
       }
@@ -855,7 +856,7 @@ html.mlpp-swap .mlpp-tile:hover { border-color: #7aa2f7 !important; }
     );
     let shield = null;
     function onMove(e) {
-      dragWidth = window.innerWidth - e.clientX - RESIZER_WIDTH / 2;
+      dragWidth = window.innerWidth - e.clientX + RESIZER_WIDTH / 2;
       schedule();
     }
     function endDrag() {
