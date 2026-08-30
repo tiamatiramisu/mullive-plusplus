@@ -4,7 +4,7 @@
 // @name:en      Mul.Live Multiview Enhancer
 // @name:ja-JP   Mul.Live マルチビュー強化
 // @namespace    http://tampermonkey.net/
-// @version      0.7.0
+// @version      0.8.0
 // @license      MIT
 // @description       Resizable chat panel, background-persistent chats, smarter video grid layout and drag-to-swap tiles for Mul.Live.
 // @description:en    Resizable chat panel, background-persistent chats, smarter video grid layout and drag-to-swap tiles for Mul.Live.
@@ -175,6 +175,7 @@
     {
       key: "layoutMode",
       name: "레이아웃",
+      tab: "레이아웃",
       type: "enum",
       options: ["자동", "열 — 영상 아래 각자 채팅", "사이드 — 단일 채팅"],
       value: 0,
@@ -183,6 +184,7 @@
     {
       key: "minColumnWidth",
       name: "열 모드 최소 열 폭",
+      tab: "레이아웃",
       type: "int",
       value: 400,
       min: 240,
@@ -190,21 +192,23 @@
       unit: "px",
       help: "열 하나의 폭이 곧 영상 폭이자 채팅 폭이다. 이보다 좁아지면 사이드로 내려간다."
     },
-    { key: "chatWidth", name: "사이드 채팅 폭", type: "int", value: 350, min: 240, max: 1600, unit: "px", help: "리사이저를 끌어도 바뀐다." },
-    { key: "tileGap", name: "타일 간격", type: "int", value: 0, min: 0, max: 40, unit: "px" },
+    { key: "chatWidth", name: "사이드 채팅 폭", tab: "레이아웃", type: "int", value: 350, min: 240, max: 1600, unit: "px", help: "리사이저를 끌어도 바뀐다." },
+    { key: "tileGap", name: "타일 간격", tab: "레이아웃", type: "int", value: 0, min: 0, max: 40, unit: "px" },
     {
       key: "gridCols",
       name: "수동 격자 — 열 수",
+      tab: "레이아웃",
       type: "int",
       value: 0,
       min: 0,
       max: 12,
       help: "0이 아니면 이 열 수로 고정한다. 지정하면 열 모드는 적용되지 않고 사이드 채팅이 된다."
     },
-    { key: "gridRows", name: "수동 격자 — 행 수", type: "int", value: 0, min: 0, max: 12, help: "방송 수에 필요한 행보다 크면 빈 칸이 남는다." },
+    { key: "gridRows", name: "수동 격자 — 행 수", tab: "레이아웃", type: "int", value: 0, min: 0, max: 12, help: "방송 수에 필요한 행보다 크면 빈 칸이 남는다." },
     {
       key: "chatStagger",
       name: "채팅 생성 간격",
+      tab: "채팅",
       type: "int",
       value: 800,
       min: 0,
@@ -215,6 +219,7 @@
     {
       key: "chatLimit",
       name: "동시 유지 채팅 수",
+      tab: "채팅",
       type: "int",
       value: 0,
       min: 0,
@@ -404,7 +409,7 @@
   pointer-events: none !important;
 }
 `;
-  function createAudioMixer({ players, root }) {
+  function createAudioMixer({ players, root, bus }) {
     const pinned = /* @__PURE__ */ new Set();
     let hovered = -1;
     let rects = /* @__PURE__ */ new Map();
@@ -415,15 +420,6 @@
       const set2 = new Set(pinned);
       if (hovered >= 0) set2.add(hovered);
       return set2;
-    }
-    function indexOf(source) {
-      return players.findIndex((f) => f.contentWindow === source);
-    }
-    function send(index, data) {
-      const win = players[index]?.contentWindow;
-      if (!win) return;
-      win.postMessage({ mlpp: true, ...data }, "https://play.sooplive.com");
-      win.postMessage({ mlpp: true, ...data }, "https://play.sooplive.co.kr");
     }
     function ensureOverlay(index) {
       const existing = overlays.get(index);
@@ -442,7 +438,7 @@
         const muted = soloing && !set2.has(index);
         if (sent.get(index) !== muted) {
           sent.set(index, muted);
-          send(index, { kind: "mute", muted });
+          bus.send(index, { kind: "mute", muted });
         }
       });
       const hoveredKind = hovered < 0 ? null : set2.has(hovered) ? "solo" : "muted";
@@ -462,18 +458,10 @@
       setStyle("audio", rules.join("\n"));
       document.documentElement.dataset.mlppAudio = `pinned=[${[...pinned].join(",")}] hovered=${hovered} muted=[${players.map((_, i) => soloing && !set2.has(i) ? i : null).filter((i) => i !== null).join(",")}] agents=[${[...agents].join(",")}]`;
     }
-    window.addEventListener("message", (e) => {
-      if (!/^https:\/\/play\.sooplive\.(com|co\.kr)$/.test(e.origin)) return;
-      const data = (
-        /** @type {{ mlpp?: unknown, kind?: string, on?: unknown } | null} */
-        e.data
-      );
-      if (!data || data.mlpp !== true) return;
-      const index = indexOf(e.source);
-      if (index < 0) return;
+    bus.on((index, data) => {
       switch (data.kind) {
         case "agent":
-          send(index, { kind: "hello" });
+          bus.send(index, { kind: "hello" });
           sent.delete(index);
           apply();
           break;
@@ -496,7 +484,7 @@
     return {
       /** 플레이어가 준비되면 부른다. 에이전트가 먼저 올라와 있을 수도 있어 양쪽에서 인사한다. */
       greet(index) {
-        send(index, { kind: "hello" });
+        bus.send(index, { kind: "hello" });
       },
       /** @param {Map<number, import('./geometry.js').Rect>} next 스트림별 화면 위치 */
       update(next) {
@@ -508,6 +496,39 @@
         pinned.clear();
         hovered = -1;
         apply();
+      }
+    };
+  }
+
+  // src/frames.js
+  var SOOP_ORIGIN = /^https:\/\/play\.sooplive\.(com|co\.kr)$/;
+  var TARGETS = ["https://play.sooplive.com", "https://play.sooplive.co.kr"];
+  function createFrameBus(players) {
+    const listeners3 = /* @__PURE__ */ new Set();
+    window.addEventListener("message", (e) => {
+      if (!SOOP_ORIGIN.test(e.origin)) return;
+      const data = (
+        /** @type {(FrameMessage & { mlpp?: unknown }) | null} */
+        e.data
+      );
+      if (!data || data.mlpp !== true) return;
+      const index = players.findIndex((f) => f.contentWindow === e.source);
+      if (index < 0) return;
+      listeners3.forEach((fn) => fn(index, data));
+    });
+    return {
+      /** @param {(index: number, data: FrameMessage) => void} fn */
+      on(fn) {
+        listeners3.add(fn);
+      },
+      /**
+       * @param {number} index
+       * @param {Record<string, unknown>} data
+       */
+      send(index, data) {
+        const win = players[index]?.contentWindow;
+        if (!win) return;
+        for (const target of TARGETS) win.postMessage({ mlpp: true, ...data }, target);
       }
     };
   }
@@ -813,7 +834,7 @@ html.mlpp-swap .mlpp-tile:hover { border-color: #7aa2f7 !important; }
   function place(selector, r, extra = "") {
     return `${selector} { left: ${r.x}px !important; top: ${r.y}px !important; width: ${r.w}px !important; height: ${r.h}px !important; ${extra} }`;
   }
-  function startLayout(hooks, chatsRoot, chats, audio) {
+  function startLayout(hooks, chatsRoot, chats, audio, bus) {
     hooks.chatToggle.before(chatsRoot);
     chatsRoot.append(hooks.chatSelect);
     const resizer = document.createElement("div");
@@ -822,7 +843,9 @@ html.mlpp-swap .mlpp-tile:hover { border-color: #7aa2f7 !important; }
     chatsRoot.append(resizer);
     let timer = 0;
     let chatVisible = true;
-    let active = chats.firstUsable();
+    let committed = chats.firstUsable();
+    let preview = -1;
+    const activeChat = () => preview >= 0 ? preview : committed;
     const orderKey = `order:${location.pathname}`;
     let order = loadOrder(orderKey, hooks.players.length);
     const dnd = createDragSwap({
@@ -872,7 +895,8 @@ html.mlpp-swap .mlpp-tile:hover { border-color: #7aa2f7 !important; }
       }
       const columns = layout.mode === "columns";
       const parked = { x: W - cw, y: SELECT_HEIGHT, w: cw, h: Math.max(1, H - SELECT_HEIGHT) };
-      const visible = columns ? chats.usable : chatVisible && active >= 0 ? [active] : [];
+      const current = activeChat();
+      const visible = columns ? chats.usable : chatVisible && current >= 0 ? [current] : [];
       const slots = /* @__PURE__ */ new Map();
       if (columns) {
         layout.chats.forEach((r, slot) => {
@@ -913,6 +937,7 @@ html.mlpp-swap .mlpp-tile:hover { border-color: #7aa2f7 !important; }
       } else {
         const panel = layout.chats[0];
         rules.push("#chat-select { display: block !important; }");
+        if (current >= 0 && hooks.chatSelect.selectedIndex !== current) hooks.chatSelect.selectedIndex = current;
         if (panel) {
           const left = panel.x + RESIZER_WIDTH + 2;
           const w = Math.max(40, panel.w - RESIZER_WIDTH - 6);
@@ -939,9 +964,10 @@ html.mlpp-swap .mlpp-tile:hover { border-color: #7aa2f7 !important; }
         e.stopPropagation();
         if (hooks.chatSelect.value === "about:blank") {
           chatVisible = false;
-          if (active >= 0) hooks.chatSelect.selectedIndex = active;
+          if (committed >= 0) hooks.chatSelect.selectedIndex = committed;
         } else {
-          active = hooks.chatSelect.selectedIndex;
+          committed = hooks.chatSelect.selectedIndex;
+          preview = -1;
           chatVisible = true;
         }
         schedule();
@@ -972,9 +998,9 @@ html.mlpp-swap .mlpp-tile:hover { border-color: #7aa2f7 !important; }
       shield?.remove();
       shield = null;
       if (dragWidth !== null) {
-        const committed = chatWidth();
+        const committed2 = chatWidth();
         dragWidth = null;
-        set("chatWidth", committed);
+        set("chatWidth", committed2);
       }
       schedule();
     }
@@ -996,6 +1022,19 @@ html.mlpp-swap .mlpp-tile:hover { border-color: #7aa2f7 !important; }
     resizer.addEventListener("dblclick", () => {
       set("chatWidth", DEFAULT_CHAT_WIDTH);
       schedule();
+    });
+    bus.on((index, data) => {
+      if (!chats.usable.includes(index)) return;
+      if (data.kind === "hover") {
+        if (data.on) preview = index;
+        else if (preview === index) preview = -1;
+        schedule();
+      } else if (data.kind === "commit") {
+        committed = index;
+        preview = -1;
+        chatVisible = true;
+        schedule();
+      }
     });
     window.addEventListener("resize", schedule);
     onChange(schedule);
@@ -1053,6 +1092,29 @@ html.mlpp-swap .mlpp-tile:hover { border-color: #7aa2f7 !important; }
   font-weight: 700 !important;
   color: #fff !important;
 }
+#mlpp-panel .mlpp-tabs {
+  display: flex !important;
+  gap: 2px !important;
+  margin: 0 0 12px !important;
+  border-bottom: 1px solid #2c2d31 !important;
+}
+#mlpp-panel .mlpp-tabs button {
+  padding: 6px 12px !important;
+  border: 0 !important;
+  border-bottom: 2px solid transparent !important;
+  border-radius: 0 !important;
+  background: transparent !important;
+  color: #8a8f98 !important;
+  font-size: 12px !important;
+  cursor: pointer !important;
+}
+#mlpp-panel .mlpp-tabs button:hover { color: #d0d0d0 !important; }
+#mlpp-panel .mlpp-tabs button.mlpp-active {
+  color: #fff !important;
+  border-bottom-color: #4c8dff !important;
+}
+#mlpp-panel .mlpp-tab-body { display: none !important; }
+#mlpp-panel .mlpp-tab-body.mlpp-active { display: block !important; }
 #mlpp-panel .mlpp-row { margin-bottom: 12px !important; }
 #mlpp-panel .mlpp-label {
   display: flex !important;
@@ -1114,6 +1176,27 @@ html.mlpp-swap .mlpp-tile:hover { border-color: #7aa2f7 !important; }
     title.textContent = "Mul.Live++ 설정";
     panel.append(title);
     const controls = /* @__PURE__ */ new Map();
+    const tabNames = [...new Set(SCHEMA.map((f) => f.tab))];
+    const tabBar = document.createElement("div");
+    tabBar.className = "mlpp-tabs";
+    const bodies = /* @__PURE__ */ new Map();
+    const tabButtons = /* @__PURE__ */ new Map();
+    function showTab(name) {
+      for (const [tab, body] of bodies) body.classList.toggle("mlpp-active", tab === name);
+      for (const [tab, button] of tabButtons) button.classList.toggle("mlpp-active", tab === name);
+    }
+    for (const name of tabNames) {
+      const button = document.createElement("button");
+      button.type = "button";
+      button.textContent = name;
+      button.addEventListener("click", () => showTab(name));
+      tabBar.append(button);
+      tabButtons.set(name, button);
+      const body = document.createElement("div");
+      body.className = "mlpp-tab-body";
+      bodies.set(name, body);
+    }
+    panel.append(tabBar, ...bodies.values());
     for (const field of SCHEMA) {
       const row = document.createElement("div");
       row.className = "mlpp-row";
@@ -1164,8 +1247,9 @@ html.mlpp-swap .mlpp-tile:hover { border-color: #7aa2f7 !important; }
         help.textContent = field.help;
         row.append(help);
       }
-      panel.append(row);
+      bodies.get(field.tab)?.append(row);
     }
+    showTab(tabNames[0]);
     const bar = document.createElement("div");
     bar.className = "mlpp-actions";
     for (const action of [...actions, { label: "설정 초기화", run: () => resetAll() }]) {
@@ -1280,11 +1364,21 @@ html.mlpp-swap .mlpp-tile:hover { border-color: #7aa2f7 !important; }
       },
       true
     );
+    window.addEventListener(
+      "contextmenu",
+      (e) => {
+        if (!parentOrigin || !inCenter(e)) return;
+        e.stopPropagation();
+        e.preventDefault();
+        report({ kind: "commit" });
+      },
+      true
+    );
     window.parent.postMessage({ mlpp: true, kind: "agent" }, "*");
   }
 
   // src/ready.js
-  var SOOP_ORIGIN = /^https:\/\/play\.sooplive\.(com|co\.kr)$/;
+  var SOOP_ORIGIN2 = /^https:\/\/play\.sooplive\.(com|co\.kr)$/;
   var SETTLE_MS = 500;
   var GIVE_UP_MS = 1e4;
   var ready = /* @__PURE__ */ new Set();
@@ -1302,7 +1396,7 @@ html.mlpp-swap .mlpp-tile:hover { border-color: #7aa2f7 !important; }
     window.addEventListener("message", (e) => {
       const source = e.source;
       if (!source) return;
-      if (!SOOP_ORIGIN.test(e.origin)) return;
+      if (!SOOP_ORIGIN2.test(e.origin)) return;
       const cmd = (
         /** @type {{ cmd?: string } | null} */
         e.data?.cmd
@@ -1365,8 +1459,9 @@ html.mlpp-swap .mlpp-tile:hover { border-color: #7aa2f7 !important; }
     const glowRoot = document.createElement("div");
     glowRoot.id = "mlpp-glow";
     hooks.streams.before(glowRoot);
-    const audio = createAudioMixer({ players: hooks.players, root: glowRoot });
-    const layout = startLayout(hooks, chatsRoot, chats, audio);
+    const bus = createFrameBus(hooks.players);
+    const audio = createAudioMixer({ players: hooks.players, root: glowRoot, bus });
+    const layout = startLayout(hooks, chatsRoot, chats, audio, bus);
     onPlayerReady(() => {
       if (timedOut()) warn("플레이어 준비 신호를 받지 못해 채팅을 그대로 만듭니다.");
       hooks.players.forEach((_, i) => audio.greet(i));
