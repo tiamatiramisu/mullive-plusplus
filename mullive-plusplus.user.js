@@ -4,7 +4,7 @@
 // @name:en      Mul.Live Multiview Enhancer
 // @name:ja-JP   Mul.Live マルチビュー強化
 // @namespace    http://tampermonkey.net/
-// @version      0.15.0
+// @version      0.16.0
 // @license      MIT
 // @description       Resizable chat panel, background-persistent chats, smarter video grid layout and drag-to-swap tiles for Mul.Live.
 // @description:en    Resizable chat panel, background-persistent chats, smarter video grid layout and drag-to-swap tiles for Mul.Live.
@@ -404,8 +404,9 @@
   }
 
   // src/audio.js
-  var SOLO_GLOW = "rgba(76, 141, 255, 0.5)";
-  var SOLO_RIPPLE = "rgba(96, 155, 255, 0.95)";
+  var SOLO_COLOR = "rgb(96, 155, 255)";
+  var RIPPLE_OPACITY = 0.6;
+  var RIPPLE_TRAVEL = 38;
   var PULSE_PERIOD_MS = 1500;
   var PULSE_STAGGER_MS = 170;
   var BASE_CSS = `
@@ -416,6 +417,7 @@
 }
 /* 층 순서는 layout.js 의 주석 참고. 채팅(1) 위, 영상(4) 아래에 놓아야
    열 모드에서 채팅에 가려지지 않으면서 이웃 화면도 가리지 않는다. */
+/* 고정 하이라이트는 두지 않는다. 단서는 지나가는 선 하나뿐이다. */
 .mlpp-audio {
   position: absolute !important;
   z-index: 3 !important;
@@ -424,10 +426,11 @@
   background: transparent !important;
   border: 0 !important;
   pointer-events: none !important;
-  box-shadow: 0 0 14px 3px var(--mlpp-glow, transparent) !important;
 }
-/* 파동은 별도 자식이 맡는다. 바탕 글로우와 box-shadow 가 서로 덮어쓰지 않게 하려는 것이다.
-   peak 순간마다 한 발씩 쏘고, 애니메이션이 끝나면 사라진다.
+/* 파동은 outline 과 outline-offset 으로 그린다.
+   box-shadow 의 spread 는 면을 채워서 사각형이 커지는 것처럼 보인다.
+   outline 은 두께가 그대로인 선이라, offset 만 키우면 선 하나가 밖으로 이동한다.
+   outline 은 레이아웃에 영향을 주지 않아 이웃을 밀지도 않는다.
 
    opacity 에 !important 를 붙이면 안 된다. CSS 캐스케이드에서 important 선언은
    애니메이션보다 우선이라, Web Animations 가 올린 opacity 가 0으로 눌려 영영 안 보인다. */
@@ -435,6 +438,8 @@
   position: absolute !important;
   inset: 0 !important;
   pointer-events: none !important;
+  outline: 2px solid var(--mlpp-glow, transparent) !important;
+  outline-offset: 0;
   opacity: 0;
 }
 `;
@@ -445,7 +450,6 @@
     const overlays = /* @__PURE__ */ new Map();
     const sent = /* @__PURE__ */ new Map();
     const agents = /* @__PURE__ */ new Set();
-    const colors = /* @__PURE__ */ new Map();
     let shown = [];
     let pulseTimer = 0;
     function active() {
@@ -469,14 +473,13 @@
     function ripple(index, strength) {
       const el = overlays.get(index);
       const node = el?.querySelector(".mlpp-ripple");
-      const color = colors.get(index);
-      if (!node || !color || !shown.includes(index)) return;
-      const spread = Math.round(16 + strength * 26);
+      if (!node || !shown.includes(index)) return;
+      const travel = Math.round(RIPPLE_TRAVEL * (0.6 + strength * 0.4));
       node.animate(
         [
-          { boxShadow: `0 0 2px 0px ${color}`, opacity: 1, offset: 0 },
-          { boxShadow: `0 0 6px ${Math.round(spread * 0.45)}px ${color}`, opacity: 0.75, offset: 0.35 },
-          { boxShadow: `0 0 12px ${spread}px ${color}`, opacity: 0, offset: 1 }
+          { outlineOffset: "0px", opacity: RIPPLE_OPACITY, offset: 0 },
+          { outlineOffset: `${Math.round(travel * 0.5)}px`, opacity: RIPPLE_OPACITY * 0.7, offset: 0.5 },
+          { outlineOffset: `${travel}px`, opacity: 0, offset: 1 }
         ],
         { duration: 900, easing: "cubic-bezier(0.15, 0.7, 0.3, 1)" }
       );
@@ -513,11 +516,9 @@
           rules.push(`#${el.id} { display: none !important; }`);
           continue;
         }
-        const glow = SOLO_GLOW;
-        colors.set(index, SOLO_RIPPLE);
         next.push(index);
         rules.push(
-          `#${el.id} { display: block !important; left: ${r.x}px !important; top: ${r.y}px !important; width: ${r.w}px !important; height: ${r.h}px !important; --mlpp-glow: ${glow} !important; }`
+          `#${el.id} { display: block !important; left: ${r.x}px !important; top: ${r.y}px !important; width: ${r.w}px !important; height: ${r.h}px !important; --mlpp-glow: ${SOLO_COLOR} !important; }`
         );
       }
       shown = next;
