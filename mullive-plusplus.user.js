@@ -4,7 +4,7 @@
 // @name:en      Mul.Live Multiview Enhancer
 // @name:ja-JP   Mul.Live マルチビュー強化
 // @namespace    http://tampermonkey.net/
-// @version      0.6.0
+// @version      0.7.0
 // @license      MIT
 // @description       Resizable chat panel, background-persistent chats, smarter video grid layout and drag-to-swap tiles for Mul.Live.
 // @description:en    Resizable chat panel, background-persistent chats, smarter video grid layout and drag-to-swap tiles for Mul.Live.
@@ -23,11 +23,6 @@
 // @grant        GM_addStyle
 // @grant        GM_setValue
 // @grant        GM_getValue
-// @grant        GM_deleteValue
-// @grant        GM_registerMenuCommand
-// @grant        GM_unregisterMenuCommand
-// @grant        GM_addValueChangeListener
-// @require      https://github.com/PRO-2684/GM_config/releases/download/v1.2.2/config.js#md5=fca1967de605996e44d14d2eab403706
 // ==/UserScript==
 
 "use strict";
@@ -176,98 +171,84 @@
     /** @type {const} */
     ["auto", "columns", "side"]
   );
-  var DESC = {
-    $default: { autoClose: false },
-    layoutMode: {
+  var SCHEMA = [
+    {
+      key: "layoutMode",
       name: "레이아웃",
-      title: "자동: 가로 화면이고 열 폭이 충분하면 열 모드, 아니면 사이드 모드",
       type: "enum",
       options: ["자동", "열 — 영상 아래 각자 채팅", "사이드 — 단일 채팅"],
-      value: 0
+      value: 0,
+      help: "자동: 가로 화면이고 열 폭이 충분하면 열 모드, 아니면 사이드."
     },
-    minColumnWidth: {
-      name: "열 모드 최소 열 폭 (px)",
-      title: "열 하나의 폭이 곧 영상 폭이자 채팅 폭이다. 이보다 좁아지면 사이드 모드로 내려간다.",
+    {
+      key: "minColumnWidth",
+      name: "열 모드 최소 열 폭",
       type: "int",
       value: 400,
       min: 240,
-      max: 1200
+      max: 1200,
+      unit: "px",
+      help: "열 하나의 폭이 곧 영상 폭이자 채팅 폭이다. 이보다 좁아지면 사이드로 내려간다."
     },
-    chatWidth: { name: "사이드 채팅 폭 (px)", title: "리사이저를 끌어도 바뀐다.", type: "int", value: 350, min: 240, max: 1600 },
-    tileGap: { name: "타일 간격 (px)", title: "영상·채팅 사이의 여백. 0이면 딱 붙는다.", type: "int", value: 0, min: 0, max: 40 },
-    gridCols: {
-      name: "수동 격자 — 열 수 (0 = 자동)",
-      title: "0이 아니면 영상을 이 열 수로 배치한다. 수동 격자를 쓰면 열 모드(영상 아래 채팅)는 적용되지 않고 사이드 채팅이 된다.",
+    { key: "chatWidth", name: "사이드 채팅 폭", type: "int", value: 350, min: 240, max: 1600, unit: "px", help: "리사이저를 끌어도 바뀐다." },
+    { key: "tileGap", name: "타일 간격", type: "int", value: 0, min: 0, max: 40, unit: "px" },
+    {
+      key: "gridCols",
+      name: "수동 격자 — 열 수",
       type: "int",
       value: 0,
       min: 0,
-      max: 12
+      max: 12,
+      help: "0이 아니면 이 열 수로 고정한다. 지정하면 열 모드는 적용되지 않고 사이드 채팅이 된다."
     },
-    gridRows: {
-      name: "수동 격자 — 행 수 (0 = 자동)",
-      title: "방송 수에 필요한 행보다 크면 빈 칸이 남는다. 모자라면 필요한 만큼 늘어난다.",
-      type: "int",
-      value: 0,
-      min: 0,
-      max: 12
-    },
-    chatStagger: {
-      name: "채팅 생성 간격 (ms)",
-      title: "채팅을 한꺼번에 띄우면 플레이어들이 동시에 재생을 시작하는 시점과 겹쳐 로딩이 실패할 수 있다. 하나씩 이 간격을 두고 만든다.",
+    { key: "gridRows", name: "수동 격자 — 행 수", type: "int", value: 0, min: 0, max: 12, help: "방송 수에 필요한 행보다 크면 빈 칸이 남는다." },
+    {
+      key: "chatStagger",
+      name: "채팅 생성 간격",
       type: "int",
       value: 800,
       min: 0,
-      max: 5e3
+      max: 5e3,
+      unit: "ms",
+      help: "채팅을 한꺼번에 띄우면 플레이어들이 동시에 재생을 시작하는 시점과 겹쳐 로딩이 실패할 수 있다."
     },
-    chatLimit: {
-      name: "동시 유지 채팅 수 (0 = 무제한)",
-      title: "유지 중인 채팅이 이 수를 넘으면 오래 안 본 것부터 렌더를 멈춘다. 연결은 유지되므로 다시 열면 즉시 보인다.",
+    {
+      key: "chatLimit",
+      name: "동시 유지 채팅 수",
       type: "int",
       value: 0,
       min: 0,
-      max: 20
+      max: 20,
+      help: "0이면 무제한. 넘으면 오래 안 본 것부터 렌더를 멈춘다. 연결은 유지되므로 다시 열면 즉시 보인다."
     }
-  };
-  var DEFAULTS = Object.fromEntries(
-    Object.entries(DESC).filter(([k]) => k !== "$default").map(([k, v]) => [
-      k,
-      /** @type {any} */
-      v.value
-    ])
-  );
-  var config = null;
+  ];
+  var DEFAULTS = Object.fromEntries(SCHEMA.map((f) => [f.key, f.value]));
   var memory = /* @__PURE__ */ new Map();
   var listeners = /* @__PURE__ */ new Set();
-  function init() {
-    try {
-      if (typeof GM_config !== "undefined") {
-        config = new GM_config(DESC);
-        config.addEventListener("set", () => listeners.forEach((fn) => fn()));
-        return;
-      }
-    } catch {
-      config = null;
-    }
-  }
   function onChange(fn) {
     listeners.add(fn);
   }
-  function raw(key) {
-    if (config) {
-      const v = config.get(key);
-      if (typeof v === "number") return v;
-    }
+  function get(key) {
+    const fallback = DEFAULTS[key] ?? 0;
     try {
-      if (typeof GM_getValue === "function") return Number(GM_getValue(key, DEFAULTS[key]));
+      if (typeof GM_getValue === "function") return Number(GM_getValue(key, fallback));
     } catch {
     }
-    return memory.get(key) ?? DEFAULTS[key];
-  }
-  function get(key) {
-    return raw(key);
+    return memory.get(key) ?? fallback;
   }
   function layoutMode() {
-    return LAYOUT_MODES[raw("layoutMode")] ?? "auto";
+    return LAYOUT_MODES[get("layoutMode")] ?? "auto";
+  }
+  function set(key, value) {
+    memory.set(key, value);
+    try {
+      if (typeof GM_setValue === "function") GM_setValue(key, value);
+    } catch {
+    }
+    listeners.forEach((fn) => fn());
+  }
+  function resetAll() {
+    for (const field of SCHEMA) set(field.key, field.value);
   }
   var orderMemory = /* @__PURE__ */ new Map();
   function loadOrder(key, n) {
@@ -290,18 +271,6 @@
       if (typeof GM_setValue === "function") GM_setValue(key, value);
     } catch {
     }
-  }
-  function set(key, value) {
-    memory.set(key, value);
-    try {
-      if (config) {
-        config.set(key, value);
-        return;
-      }
-      if (typeof GM_setValue === "function") GM_setValue(key, value);
-    } catch {
-    }
-    listeners.forEach((fn) => fn());
   }
 
   // src/chats.js
@@ -880,9 +849,9 @@ html.mlpp-swap .mlpp-tile:hover { border-color: #7aa2f7 !important; }
     new MutationObserver(blankPageChat).observe(hooks.chat, { attributes: true, attributeFilter: ["src"] });
     blankPageChat();
     function chatWidth() {
-      const raw2 = dragWidth ?? get("chatWidth");
+      const raw = dragWidth ?? get("chatWidth");
       const max = Math.max(MIN_CHAT_WIDTH, Math.floor(window.innerWidth * 0.6));
-      return Math.min(max, Math.max(MIN_CHAT_WIDTH, Math.round(raw2)));
+      return Math.min(max, Math.max(MIN_CHAT_WIDTH, Math.round(raw)));
     }
     function render() {
       timer = 0;
@@ -1035,6 +1004,207 @@ html.mlpp-swap .mlpp-tile:hover { border-color: #7aa2f7 !important; }
     return { schedule, render, resetOrder, swapHint: dnd.hint };
   }
 
+  // src/panel.js
+  var Z = 2147483e3;
+  var BASE_CSS4 = `
+#mlpp-gear {
+  position: fixed !important;
+  top: 0 !important;
+  right: 34px !important;
+  z-index: ${Z} !important;
+  width: 28px !important;
+  height: 28px !important;
+  padding: 0 !important;
+  border: 0 !important;
+  border-radius: 0 0 8px 8px !important;
+  background-color: rgba(34, 34, 34, 0.55) !important;
+  color: #ccc !important;
+  font-size: 15px !important;
+  line-height: 28px !important;
+  text-align: center !important;
+  cursor: pointer !important;
+  opacity: 0.35 !important;
+  transition: opacity 120ms ease-in-out, background-color 120ms ease-in-out !important;
+}
+#mlpp-gear:hover, #mlpp-gear.mlpp-open { opacity: 1 !important; background-color: #444 !important; }
+#mlpp-panel {
+  position: fixed !important;
+  top: 30px !important;
+  right: 8px !important;
+  z-index: ${Z} !important;
+  display: none !important;
+  box-sizing: border-box !important;
+  width: 340px !important;
+  max-height: calc(100vh - 44px) !important;
+  overflow-y: auto !important;
+  padding: 12px 14px 14px !important;
+  border: 1px solid #3a3a3a !important;
+  border-radius: 8px !important;
+  background-color: #1b1c1f !important;
+  color: #e6e6e6 !important;
+  font-size: 13px !important;
+  line-height: 1.45 !important;
+  box-shadow: 0 8px 28px rgba(0, 0, 0, 0.6) !important;
+}
+#mlpp-panel.mlpp-open { display: block !important; }
+#mlpp-panel h2 {
+  margin: 0 0 10px !important;
+  font-size: 13px !important;
+  font-weight: 700 !important;
+  color: #fff !important;
+}
+#mlpp-panel .mlpp-row { margin-bottom: 12px !important; }
+#mlpp-panel .mlpp-label {
+  display: flex !important;
+  align-items: center !important;
+  justify-content: space-between !important;
+  gap: 8px !important;
+  margin-bottom: 4px !important;
+}
+#mlpp-panel .mlpp-name { color: #e6e6e6 !important; }
+#mlpp-panel .mlpp-help {
+  margin-top: 3px !important;
+  color: #8a8f98 !important;
+  font-size: 11px !important;
+  line-height: 1.4 !important;
+}
+#mlpp-panel select, #mlpp-panel input[type="number"] {
+  box-sizing: border-box !important;
+  padding: 4px 6px !important;
+  border: 1px solid #3a3a3a !important;
+  border-radius: 4px !important;
+  background-color: #101114 !important;
+  color: #e6e6e6 !important;
+  font-size: 13px !important;
+  outline: none !important;
+}
+#mlpp-panel select { width: 100% !important; }
+#mlpp-panel input[type="number"] { width: 88px !important; text-align: right !important; }
+#mlpp-panel .mlpp-unit { color: #8a8f98 !important; font-size: 11px !important; }
+#mlpp-panel .mlpp-actions {
+  display: flex !important;
+  flex-wrap: wrap !important;
+  gap: 6px !important;
+  margin-top: 14px !important;
+  padding-top: 12px !important;
+  border-top: 1px solid #2c2d31 !important;
+}
+#mlpp-panel .mlpp-actions button {
+  flex: 1 1 auto !important;
+  padding: 6px 8px !important;
+  border: 1px solid #3a3a3a !important;
+  border-radius: 4px !important;
+  background-color: #26272b !important;
+  color: #e6e6e6 !important;
+  font-size: 12px !important;
+  cursor: pointer !important;
+}
+#mlpp-panel .mlpp-actions button:hover { background-color: #34363b !important; }
+`;
+  function createSettingsPanel(actions) {
+    setStyle("panel", BASE_CSS4);
+    const gear = document.createElement("button");
+    gear.id = "mlpp-gear";
+    gear.type = "button";
+    gear.textContent = "⚙";
+    gear.title = "Mul.Live++ 설정";
+    const panel = document.createElement("div");
+    panel.id = "mlpp-panel";
+    const title = document.createElement("h2");
+    title.textContent = "Mul.Live++ 설정";
+    panel.append(title);
+    const controls = /* @__PURE__ */ new Map();
+    for (const field of SCHEMA) {
+      const row = document.createElement("div");
+      row.className = "mlpp-row";
+      const label = document.createElement("div");
+      label.className = "mlpp-label";
+      const name = document.createElement("span");
+      name.className = "mlpp-name";
+      name.textContent = field.name;
+      label.append(name);
+      let control;
+      if (field.type === "enum") {
+        const select = document.createElement("select");
+        (field.options ?? []).forEach((text, i) => {
+          const option = document.createElement("option");
+          option.value = String(i);
+          option.textContent = text;
+          select.append(option);
+        });
+        control = select;
+      } else {
+        const input = document.createElement("input");
+        input.type = "number";
+        if (field.min !== void 0) input.min = String(field.min);
+        if (field.max !== void 0) input.max = String(field.max);
+        input.step = "1";
+        control = input;
+        label.append(input);
+        if (field.unit) {
+          const unit = document.createElement("span");
+          unit.className = "mlpp-unit";
+          unit.textContent = field.unit;
+          label.append(unit);
+        }
+      }
+      control.addEventListener("input", () => {
+        const raw = Number(control.value);
+        if (!Number.isFinite(raw)) return;
+        const min = field.min ?? (field.type === "enum" ? 0 : -Infinity);
+        const max = field.max ?? (field.type === "enum" ? (field.options?.length ?? 1) - 1 : Infinity);
+        set(field.key, Math.min(max, Math.max(min, Math.round(raw))));
+      });
+      controls.set(field.key, control);
+      row.append(label);
+      if (field.type === "enum") row.append(control);
+      if (field.help) {
+        const help = document.createElement("div");
+        help.className = "mlpp-help";
+        help.textContent = field.help;
+        row.append(help);
+      }
+      panel.append(row);
+    }
+    const bar = document.createElement("div");
+    bar.className = "mlpp-actions";
+    for (const action of [...actions, { label: "설정 초기화", run: () => resetAll() }]) {
+      const button = document.createElement("button");
+      button.type = "button";
+      button.textContent = action.label;
+      button.addEventListener("click", () => action.run());
+      bar.append(button);
+    }
+    panel.append(bar);
+    function sync() {
+      for (const [key, control] of controls) control.value = String(get(key));
+    }
+    function open() {
+      sync();
+      panel.classList.add("mlpp-open");
+      gear.classList.add("mlpp-open");
+    }
+    function close() {
+      panel.classList.remove("mlpp-open");
+      gear.classList.remove("mlpp-open");
+    }
+    gear.addEventListener("click", (e) => {
+      e.stopPropagation();
+      if (panel.classList.contains("mlpp-open")) close();
+      else open();
+    });
+    panel.addEventListener("click", (e) => e.stopPropagation());
+    document.addEventListener("click", close);
+    document.addEventListener("keydown", (e) => {
+      if (e.key === "Escape") close();
+    });
+    onChange(() => {
+      if (panel.classList.contains("mlpp-open")) sync();
+    });
+    document.body.append(gear, panel);
+    sync();
+  }
+
   // src/player-agent.js
   var PARENT_ORIGIN = /^https:\/\/(www\.)?mul\.live$/;
   var CENTER = { x0: 0.2, x1: 0.8, y0: 0.2, y1: 0.7 };
@@ -1183,7 +1353,6 @@ html.mlpp-swap .mlpp-tile:hover { border-color: #7aa2f7 !important; }
       warn("페이지 훅을 찾지 못해 아무것도 하지 않습니다.");
       return;
     }
-    init();
     const options = readChatOptions(hooks.chatSelect);
     const canCreate = (index) => {
       const url = options[index]?.url ?? "";
@@ -1203,10 +1372,10 @@ html.mlpp-swap .mlpp-tile:hover { border-color: #7aa2f7 !important; }
       hooks.players.forEach((_, i) => audio.greet(i));
       layout.schedule();
     });
-    if (typeof GM_registerMenuCommand === "function") {
-      GM_registerMenuCommand("영상 순서 초기화", () => layout.resetOrder());
-      GM_registerMenuCommand("솔로/음소거 해제", () => audio.reset());
-    }
+    createSettingsPanel([
+      { label: "영상 순서 초기화", run: () => layout.resetOrder() },
+      { label: "솔로/음소거 해제", run: () => audio.reset() }
+    ]);
     log(`v${VERSION} booted`, {
       swap: layout.swapHint,
       style: getStyleMode(),
