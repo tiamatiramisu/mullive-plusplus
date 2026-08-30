@@ -242,19 +242,7 @@ export function createAudioMixer({ players, root, bus }) {
         else if (hovered === index) hovered = -1;
         apply();
         break;
-      case 'toggle': {
-        const added = !pinned.has(index);
-        if (added) pinned.add(index);
-        else pinned.delete(index);
-        // 직접 건드린 순간부터는 사용자 것이다. 마스터를 풀어도 되돌리지 않는다.
-        if (masterAutoPinned === index) masterAutoPinned = -1;
-        const rect = rects.get(index);
-        if (rect) {
-          showToast(added ? '➕S' : '➖S', rect.x + Number(data.x ?? rect.w / 2), rect.y + Number(data.y ?? rect.h / 2));
-        }
-        apply();
-        break;
-      }
+
     }
   });
 
@@ -266,6 +254,22 @@ export function createAudioMixer({ players, root, bus }) {
   retimePulses();
 
   return {
+    /**
+     * 솔로 고정을 뒤집는다. 좌클릭인지 드래그인지 가리는 것은 부모(layout)의 일이라
+     * 버스 메시지가 아니라 이 함수로 받는다.
+     * @param {number} index
+     * @param {number} x 문서 좌표
+     * @param {number} y 문서 좌표
+     */
+    toggle(index, x, y) {
+      const added = !pinned.has(index);
+      if (added) pinned.add(index);
+      else pinned.delete(index);
+      // 직접 건드린 순간부터는 사용자 것이다. 마스터를 풀어도 되돌리지 않는다.
+      if (masterAutoPinned === index) masterAutoPinned = -1;
+      showToast(added ? '➕S' : '➖S', x, y);
+      apply();
+    },
     /** 플레이어가 준비되면 부른다. 에이전트가 먼저 올라와 있을 수도 있어 양쪽에서 인사한다. */
     greet(/** @type {number} */ index) {
       bus.send(index, { kind: 'hello' });

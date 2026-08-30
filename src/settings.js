@@ -36,7 +36,10 @@ export const STACK_PLACEMENTS = /** @type {const} */ (['bottom', 'right']);
  * @type {Record<string, { label: string, text: string, rule?: boolean }[]>}
  */
 export const TAB_HINTS = {
-  레이아웃: [{ label: '마스터 지정', text: '휠클릭으로 한 플레이어를 확대하세요.' }],
+  레이아웃: [
+    { label: '마스터 지정', text: '휠클릭으로 한 플레이어를 확대하세요.' },
+    { label: '위치 교환', text: '플레이어를 끌어서 다른 자리와 맞바꿀 수 있어요.' },
+  ],
   채팅: [
     { label: '채팅 전환', text: '플레이어에 우클릭하세요.' },
     { label: '채팅 추가/제거', text: '플레이어에 Shift+우클릭해서 채팅창을 추가할 수 있어요.' },

@@ -203,54 +203,45 @@ export function startPlayerAgent() {
     report({ kind: 'hover', on });
   }
 
-  // Alt(위치 교환 모드)도 여기서 알려야 한다.
-  // 키 이벤트는 포커스를 가진 문서에만 간다. 플레이어를 한 번 클릭하면 포커스가 이 프레임으로
-  // 넘어와 부모는 Alt를 영영 못 본다. 마우스 이벤트의 altKey는 포커스와 무관하게 실려 오므로
-  // 키와 마우스 양쪽에서 읽는다.
-  let alting = false;
-  /** @param {boolean} on */
-  function setAlt(on) {
-    if (alting === on) return;
-    alting = on;
-    report({ kind: 'alt', on });
-  }
-
   const root = document.documentElement;
-  root.addEventListener('mouseenter', (e) => {
-    setHover(true);
-    setAlt(e.altKey);
-  });
-  root.addEventListener('mousemove', (e) => {
-    setHover(true);
-    setAlt(e.altKey);
-  });
-  root.addEventListener('mouseleave', () => {
-    setHover(false);
-    setAlt(false);
-  });
-  window.addEventListener('keydown', (e) => setAlt(e.altKey || e.key === 'Alt'));
-  window.addEventListener('keyup', (e) => setAlt(e.key === 'Alt' ? false : e.altKey));
+  root.addEventListener('mouseenter', () => setHover(true));
+  root.addEventListener('mousemove', () => setHover(true));
+  root.addEventListener('mouseleave', () => setHover(false));
   // 탭을 벗어나거나 가려지면 호버가 남아 있지 않게 한다.
-  window.addEventListener('blur', () => {
-    setHover(false);
-    setAlt(false);
-  });
+  window.addEventListener('blur', () => setHover(false));
   document.addEventListener('visibilitychange', () => {
-    if (document.hidden) {
-      setHover(false);
-      setAlt(false);
-    }
+    if (document.hidden) setHover(false);
   });
 
-  // 가운데 클릭은 우리가 가져간다. 캡처 단계에서 막아야 플레이어의 재생/정지가 같이 걸리지 않는다.
+  // 좌클릭도 누름/뗌만 보고한다. 그냥 클릭이면 솔로 토글, 끌면 타일 위치 교환인데
+  // 그 판정은 부모만 할 수 있다(어느 타일 위에서 놓았는지는 프레임이 모른다).
+  // 캡처 단계에서 막아야 플레이어의 재생/정지가 같이 걸리지 않는다.
+  window.addEventListener(
+    'mousedown',
+    (e) => {
+      if (e.button !== 0 || !parentOrigin || !inCenter(e)) return;
+      e.stopPropagation();
+      e.preventDefault();
+      report({ kind: 'ldown', x: e.clientX, y: e.clientY });
+    },
+    true,
+  );
+  window.addEventListener(
+    'mouseup',
+    (e) => {
+      if (e.button !== 0 || !parentOrigin || !inCenter(e)) return;
+      e.stopPropagation();
+      e.preventDefault();
+      report({ kind: 'lup', x: e.clientX, y: e.clientY });
+    },
+    true,
+  );
   window.addEventListener(
     'click',
     (e) => {
       if (!parentOrigin || !inCenter(e)) return;
       e.stopPropagation();
       e.preventDefault();
-      // 부모는 프레임 안 좌표를 알 수 없다. 알림을 커서 옆에 띄우려면 같이 보내야 한다.
-      report({ kind: 'toggle', x: e.clientX, y: e.clientY });
     },
     true,
   );

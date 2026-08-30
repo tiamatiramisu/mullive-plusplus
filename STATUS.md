@@ -1,6 +1,6 @@
 # mullive-plusplus STATUS
 
-현재 버전: `v0.25.0` / GitHub: `tiamatiramisu/mullive-plusplus` / Greasy Fork: [593484](https://greasyfork.org/ko/scripts/593484)
+현재 버전: `v0.26.0` / GitHub: `tiamatiramisu/mullive-plusplus` / Greasy Fork: [593484](https://greasyfork.org/ko/scripts/593484)
 
 ## 스테이지
 
@@ -43,6 +43,26 @@ Stage 1(업스트림 분석)은 `SPEC.md`로 완료.
   현행(채팅 1개)에서도 발생하는 문제이며, Stage 3에서 채팅 iframe이 늘 때 빈도를 관측할 것.
 
 ## 검증 로그
+
+### 2026-08-30 — v0.26.0 Alt를 떼고 그냥 좌클릭 드래그로
+
+**조합키를 없앴다.** Alt 감지를 셋(부모 키 + 부모 `mousemove.altKey` + 프레임 보고)이나 겹쳐 쓰던 것은
+전부 "키 이벤트가 포커스를 가진 문서에만 간다"는 하나의 문제를 우회하려던 것이었다.
+좌클릭 드래그로 바꾸니 그 문제가 통째로 사라져 코드가 줄었다.
+
+**좌클릭이 솔로 토글과 겹친다.** 그래서 판정을 프레임에서 부모로 옮겼다 —
+에이전트는 `ldown`/`lup` 만 보고하고 `dnd.js` 가 `DRAG_SLOP`(6px)으로 가른다.
+안 움직였으면 `audio.toggle(stream, x, y)` 로 넘긴다. 우클릭과 완전히 같은 구조다.
+`audio` 의 버스 `toggle` 케이스를 없애고 같은 일을 하는 메서드를 노출했다.
+
+**오버레이는 슬롭을 넘긴 뒤에만 뜬다.** 클릭할 때마다 깜빡이면 안 된다.
+타일은 이제 `pointer-events: none` 고정이고 어느 타일 위인지는 실드 좌표로 계산한다.
+
+**자동화로는 확인하지 못했다.** `left_click_drag` 을 넣어도 `ldown` 이 오지 않고 `lup` 만 왔다.
+도구가 교차 출처 iframe 안으로 좌클릭 누름 좌표를 제대로 보내지 못한다(우클릭도 같은 한계).
+`ldown` 없이 온 `lup` 은 `from < 0` 가드에 막혀 아무 일도 일어나지 않는 것은 확인했고,
+실드도 남지 않았다(`div[style*=2147483646]` 0개, 화면 중앙 `elementFromPoint` 가 iframe).
+제스처 자체는 사용자 확인이 필요하다.
 
 ### 2026-08-30 — v0.25.0 링크로 배치 공유
 

@@ -266,6 +266,8 @@ export function startLayout(hooks, chatsRoot, chats, audio, bus) {
         audio.setMaster(master);
       }
     },
+    // 끌지 않고 놓았으면 솔로 토글이다. 그 판정은 dnd 가 한다.
+    click: (slot, x, y) => audio.toggle(slotStream[slot], x, y),
     schedule: () => schedule(),
   });
 
@@ -782,9 +784,13 @@ export function startLayout(hooks, chatsRoot, chats, audio, bus) {
   // 사이드 모드에서 영상에 호버하면 그 방송 채팅을 잠깐 보여주고, 우클릭하면 진짜로 넘어간다.
   // 열 모드는 채팅이 전부 보이므로 해당 없다.
   bus.on((index, data) => {
-    // 위치 교환은 채팅과 무관하다. 가드보다 앞에 둔다.
-    if (data.kind === 'alt') {
-      dnd.setFrameAlt(index, !!data.on);
+    // 좌클릭은 솔로 토글 아니면 타일 위치 교환이다. 채팅과 무관하니 가드보다 앞에 둔다.
+    if (data.kind === 'ldown' || data.kind === 'lup') {
+      const at = docPoint(index, data);
+      if (!at) return;
+      if (data.kind === 'ldown') dnd.begin(slotStream.indexOf(index), at.x, at.y);
+      // 실드가 깔리기 전에 손을 뗐을 때를 위한 보강. 실드가 먼저 받았으면 아무 일도 없다.
+      else dnd.finish(at.x, at.y);
       return;
     }
     // 마스터 앤 스택은 영상 배치라 그 방송의 채팅을 쓸 수 있는지와 무관하다. 가드보다 앞에 둔다.
