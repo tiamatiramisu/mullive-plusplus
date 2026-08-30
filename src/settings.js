@@ -11,8 +11,6 @@
 export const LAYOUT_MODES = /** @type {const} */ (['auto', 'columns', 'side']);
 /** 마스터 앤 스택에서 스택이 놓이는 곳. 순서가 곧 설정 enum 인덱스다. */
 export const STACK_PLACEMENTS = /** @type {const} */ (['bottom', 'right']);
-/** 영상 우클릭이 하는 일. 순서가 곧 설정 enum 인덱스다. */
-export const RIGHT_CLICK_ACTIONS = /** @type {const} */ (['switch', 'toggle']);
 
 /**
  * @typedef {object} Field
@@ -38,7 +36,7 @@ export const RIGHT_CLICK_ACTIONS = /** @type {const} */ (['switch', 'toggle']);
  */
 export const TAB_HINTS = {
   레이아웃: { label: '마스터 지정', text: '휠클릭으로 한 플레이어를 확대하세요.' },
-  채팅: { label: '채팅 전환', text: '플레이어에 우클릭해서 채팅을 전환/추가하세요.' },
+  채팅: { label: '채팅 전환', text: '플레이어에 우클릭하세요. Shift+우클릭이면 채팅창을 쪼개 칸을 넣고 뺍니다.' },
   사운드: { label: '솔로 지정', text: '플레이어에 좌클릭해서 듣고 싶은 영상들을 지정할 수 있어요.' },
 };
 
@@ -87,16 +85,6 @@ export const SCHEMA = [
     type: 'bool',
     value: 1,
     help: '휠클릭으로 마스터를 바꾸면 사이드 채팅도 그 방송으로 넘어간다.',
-  },
-  {
-    key: 'chatRightClick',
-    name: '우클릭 시',
-    tab: '채팅',
-    type: 'enum',
-    inline: true,
-    options: ['채팅 전환', '채팅 추가/제거'],
-    value: 0,
-    help: '추가/제거를 고르면 채팅창이 쪼개져 여러 방송을 같이 본다. 이미 있는 방송을 우클릭하면 도로 빠진다.',
   },
   {
     key: 'audioHoverPreview',
@@ -191,11 +179,6 @@ export function get(key) {
 /** 레이아웃 모드는 enum이라 인덱스로 저장된다. 문자열로 바꿔 돌려준다. */
 export function layoutMode() {
   return LAYOUT_MODES[get('layoutMode')] ?? 'auto';
-}
-
-/** @returns {'switch' | 'toggle'} */
-export function rightClickAction() {
-  return RIGHT_CLICK_ACTIONS[get('chatRightClick')] ?? 'switch';
 }
 
 /** @returns {'right' | 'bottom'} */

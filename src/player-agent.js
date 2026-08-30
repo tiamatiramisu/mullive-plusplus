@@ -225,15 +225,15 @@ export function startPlayerAgent() {
     true,
   );
 
-  // 우클릭은 사이드 채팅을 이 방송으로 확정한다. 가운데 영역에서만 가져가고
-  // 가장자리는 플레이어의 기본 메뉴에 넘긴다.
+  // 우클릭은 사이드 채팅을 이 방송으로 확정하고, Shift를 누르고 있으면 칸을 넣고 뺀다.
+  // 가운데 영역에서만 가져가고 가장자리는 플레이어의 기본 메뉴에 넘긴다.
   window.addEventListener(
     'contextmenu',
     (e) => {
       if (!parentOrigin || !inCenter(e)) return;
       e.stopPropagation();
       e.preventDefault();
-      report({ kind: 'commit' });
+      report({ kind: 'commit', shift: e.shiftKey });
     },
     true,
   );

@@ -168,6 +168,10 @@ export function startLayout(hooks, chatsRoot, chats, audio, bus) {
   let master = -1;
   /** 이 시각 전에 오는 호버 한 번은 무시한다. 마스터 전환 직후의 자리바꿈 때문에 생긴다. */
   let ignoreHoverUntil = 0;
+  /** 지금 첫 칸을 마스터 자격으로 차지한 방송. -1이면 없음. */
+  let masterChat = -1;
+  /** 그 칸을 우리가 새로 만든 것인가. 원래 켜 두었던 것이면 마스터를 풀어도 남긴다. */
+  let masterChatAuto = false;
   /** 이번 렌더에서 슬롯마다 어떤 방송이 놓였는지. 마스터 모드에서는 order와 달라진다. */
   let slotStream = /** @type {number[]} */ ([]);
 
@@ -191,26 +195,56 @@ export function startLayout(hooks, chatsRoot, chats, audio, bus) {
   });
 
   /**
-   * 이 방송의 채팅을 화면에 올린다. 전환 모드면 자리를 대신하고, 추가/제거 모드면 첫 칸에 놓는다.
-   * @param {number} index
+   * 마스터 추종. 그 방송의 채팅을 가장 큰 칸, 곧 첫 칸에 놓고 있던 칸들을 뒤로 민다.
+   *
+   * 장부는 솔로와 같다(`audio.js` 의 `masterAutoPinned`).
+   * 원래 켜 두었던 채팅이면 마스터를 풀어도 남고, 큰 칸에서 밀려나 맨 뒤로 간다.
+   * 우리가 마스터 때문에 켠 것이면 마스터를 풀 때 같이 사라진다.
+   *
+   * 칸 수 상한은 여기서 보지 않는다. `panes` 는 "보고 싶은 것"이고,
+   * 실제로 안 들어가면 render가 뒤에서부터 덜어낸다. 마스터를 풀면 그대로 되살아난다.
+   *
+   * @param {number} index -1이면 마스터 해제
    */
-  function showPane(index) {
-    if (settings.rightClickAction() === 'switch') {
-      panes = [index];
-      return;
+  function setMasterChat(index) {
+    if (settings.get('masterFollowsChat') === 0) return;
+    if (masterChat >= 0 && masterChat !== index) {
+      // 우리가 켠 것이면 뺀다. 원래 켜 두었던 것이면 남기되 가장 작은 칸(맨 뒤)으로 민다.
+      panes = masterChatAuto
+        ? panes.filter((i) => i !== masterChat)
+        : [...panes.filter((i) => i !== masterChat), masterChat];
+      masterChat = -1;
+      masterChatAuto = false;
     }
-    // 마스터 영상의 채팅은 가장 큰 칸, 곧 첫 칸에 놓는다.
-    // 자리가 없으면 칸 수를 늘리는 대신 맨 뒤를 밀어낸다.
-    const next = [index, ...panes.filter((i) => i !== index)];
-    panes = paneRoom(next.length) ? next : next.slice(0, Math.max(1, panes.length));
+    if (index < 0 || !chats.usable.includes(index)) return;
+    masterChatAuto = !panes.includes(index);
+    panes = [index, ...panes.filter((i) => i !== index)];
+    masterChat = index;
+    chatVisible = true;
   }
 
   /**
-   * 우클릭 추가/제거. 마지막 칸을 빼면 채팅 패널 자체를 접는다(타일링 WM에서 마지막 창을 닫는 것과 같다).
+   * 우클릭 전환. 쪼개 놓은 칸을 없애지 않고 **마지막 칸만** 갈아끼운다(LIFO).
+   * 나중에 넣은 칸이 먼저 밀려난다.
+   *
+   * 호버 미리보기가 노리는 칸과 같은 자리다. 넘겨보다 우클릭하면 보고 있던 그 자리에 그대로 확정된다.
+   * @param {number} index
+   */
+  function switchPane(index) {
+    chatVisible = true;
+    if (panes.includes(index)) return;
+    if (panes[panes.length - 1] === masterChat) masterChat = -1;
+    panes = panes.length === 0 ? [index] : [...panes.slice(0, -1), index];
+  }
+
+  /**
+   * Shift+우클릭 추가/제거. 마지막 칸을 빼면 채팅 패널 자체를 접는다(타일링 WM에서 마지막 창을 닫는 것과 같다).
    * 접힌 상태에서 우클릭하면 다시 편다.
    * @param {number} index
    */
   function togglePane(index) {
+    // 직접 건드린 순간부터는 사용자 것이다. 마스터를 풀어도 되돌리지 않는다.
+    if (index === masterChat) masterChatAuto = false;
     if (!chatVisible) {
       chatVisible = true;
       if (!panes.includes(index)) panes.push(index);
@@ -223,6 +257,7 @@ export function startLayout(hooks, chatsRoot, chats, audio, bus) {
         chatVisible = false;
         return;
       }
+      if (index === masterChat) masterChat = -1;
       panes = rest;
       return;
     }
@@ -233,6 +268,7 @@ export function startLayout(hooks, chatsRoot, chats, audio, bus) {
   /** 드래그 교환 순서를 기본으로 되돌린다. */
   function resetOrder() {
     master = -1;
+    setMasterChat(-1);
     audio.setMaster(-1);
     order = hooks.players.map((_, i) => i);
     settings.saveOrder(orderKey, order);
@@ -375,7 +411,7 @@ export function startLayout(hooks, chatsRoot, chats, audio, bus) {
     // 설정끼리 서로를 죽이는 상황(수동 격자가 열 모드를 끄는 등)을 눈으로 확인하기 어렵다.
     document.documentElement.dataset.mlppLayout =
       `mode=${layout.mode} master=${master} chat=${visible.join('+') || -1}` +
-      ` panes=[${panes.join(',')}] rc=${settings.rightClickAction()}` +
+      ` panes=[${panes.join(',')}] mchat=${masterChat}${masterChatAuto ? '(auto)' : ''}` +
       ` slots=[${slotStream.join(',')}] grid=${forceCols}x${forceRows} setting=${mode}` +
       ` stack=${settings.stackPlacement()}`;
     dnd.update(layout.videos);
@@ -487,8 +523,8 @@ export function startLayout(hooks, chatsRoot, chats, audio, bus) {
         // 그때 곧바로 오는 호버 한 번은 무시해야 방금 고른 마스터의 채팅이 그대로 보인다.
         ignoreHoverUntil = Date.now() + HOVER_GRACE_MS;
         preview = -1;
-        if (settings.get('masterFollowsChat') && chats.usable.includes(master)) showPane(master);
       }
+      setMasterChat(master);
       audio.setMaster(master);
       schedule();
       return;
@@ -508,13 +544,8 @@ export function startLayout(hooks, chatsRoot, chats, audio, bus) {
       schedule();
     } else if (data.kind === 'commit') {
       preview = -1;
-      if (settings.rightClickAction() === 'switch') {
-        // 토글이 아니다. 항상 그 방송으로 맞춘다.
-        panes = [index];
-        chatVisible = true;
-      } else {
-        togglePane(index);
-      }
+      if (data.shift) togglePane(index);
+      else switchPane(index);
       schedule();
     }
   });

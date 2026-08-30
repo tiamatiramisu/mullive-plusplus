@@ -251,31 +251,29 @@ export function masterStackLayout(n, W, H, gap, chatWidth, resizerWidth, chatVis
   return { mode: 'master', videos, ...chrome };
 }
 
+/** 면적이 이 안쪽으로 비슷하면 같은 크기로 본다. 반올림 1px 차이로 순서가 뒤집히는 것을 막는다. */
+const AREA_TIE = 0.02;
+
 /**
  * 채팅 패널을 n칸으로 쪼갠다.
  *
- * 타일링 WM 의 재귀 이분할을 쓰되 두 군데를 채팅에 맞게 바꿨다.
+ * 한 번에 계산하지 않고 **한 칸씩 늘려 간다.** 칸을 더할 때마다
+ * **가장 큰 칸을 반으로 자르고, 크기가 비슷하면 그중 마지막에 생긴 칸을** 자른다.
+ * 타일링 WM 의 자동 분할과 같은 요령이되 두 군데가 다르다.
  *
- * 1. **반씩이 아니라 담을 칸 수에 비례해서** 자른다. 채팅끼리는 서로 대등해서
- *    BSP처럼 절반씩 자르면 3칸일 때 1:1:2 로 삐뚤어진다. 비례해서 자르면
- *    어느 개수에서든 고르게 나뉜다(3칸이면 2:1 로 잘라 셋 다 같은 크기).
- * 2. **긴 변이 아니라 세로선(열)을 먼저 자른다.** "긴 변을 자른다"는 정사각형에 가까운
- *    칸을 만드는 규칙이라 창에는 맞지만 채팅에는 맞지 않는다. 채팅은 지나간 줄이 몇 개
- *    보이느냐가 전부라 높이가 곧 쓸모다. 폭은 최소치까지 깎아도 읽히지만 높이는 아니다.
- *    그래서 **폭을 먼저 쓰고**, 열이 최소 폭에 걸려 더 못 쪼개질 때만 가로로 눕힌다.
+ * 1. **긴 변이 아니라 세로선(열)을 먼저** 자른다. "긴 변을 자른다"는 정사각형에 가까운 칸을
+ *    만드는 규칙이라 창에는 맞지만 채팅에는 맞지 않는다. 채팅은 지나간 줄이 몇 개 보이느냐가
+ *    전부라 **높이가 곧 쓸모**다. 폭은 최소치까지 깎아도 읽히지만 높이는 아니다.
+ *    그래서 폭을 먼저 쓰고, 열이 최소 폭에 걸려 더 못 쪼개질 때만 가로로 눕힌다.
+ * 2. **크기가 비슷하면 나중에 생긴 칸을 자른다.** 처음 켠 채팅이 메인이라 오래 크게 두고 싶다.
+ *    2칸과 3칸 사이에서 첫 칸과 둘째 칸의 면적이 같은데, 이때 둘째를 자르므로 첫 칸이 살아남는다.
+ *    첫 칸이 **혼자 눈에 띄게 클 때만** 잘린다. 그 시점이 정확히 나머지가 모두 한 번씩
+ *    쪼개진 뒤라, 4칸이면 저절로 균등 4분할이 된다.
  *
- * 3. **첫 칸은 메인으로 떼어 두고 나머지끼리만 나눈다.** 칸이 늘 때마다 전부 다시
- *    비례 배분하면 처음 보던 채팅이 계속 쪼그라든다. 한 번만 갈라 메인에 절반을 주고,
- *    새 칸들은 남은 절반 안에서만 자리를 나눈다. 그래서 메인은 몇 개가 붙든 크기가 그대로다.
- *    dwm 의 master + stack 과 같은 구조다. 다만 stack 쪽은 BSP처럼 반씩 자르지 않고
- *    1번 규칙대로 고르게 나눈다 — 채팅끼리는 대등해서 큰 놈 하나만 남길 이유가 없다.
- *
- * 메인 몫을 지키면 다 못 담는 좁은 패널에서는 메인을 포기하고 전부 고르게 나눈다.
- * 메인을 지키려다 칸을 못 늘리는 것보다 낫다.
- *
- * 그래서 넓은 패널은 열로 갈라지고(745폭이면 메인 372, 나머지가 372 안에서 나뉜다),
- * 기본 폭처럼 좁은 패널은 첫 시도부터 최소 폭에 걸려 위아래로 쌓인다.
  * 최소 크기에 걸려 못 나누면 null 을 준다. 부르는 쪽이 칸 수를 줄여 다시 부른다.
+ * 한 칸뿐일 때는 최소 크기를 따지지 않는다. 좁은 화면에서도 채팅은 보여야 한다.
+ *
+ * 돌려주는 순서는 **생긴 순서**다. 곧 `[0]` 이 메인이다.
  *
  * @param {Rect} region
  * @param {number} n
@@ -285,78 +283,73 @@ export function masterStackLayout(n, W, H, gap, chatWidth, resizerWidth, chatVis
  * @returns {Rect[] | null}
  */
 export function splitChatPanes(region, n, minW, minH, gap) {
-  // 한 칸이면 최소 크기를 따지지 않는다. 좁은 화면에서도 채팅은 보여야 한다.
   if (n <= 1) return [region];
-  return carveMain(region, n, minW, minH, gap) ?? divide(region, n, minW, minH, gap);
+
+  /** @type {Rect[]} */
+  const panes = [region];
+  while (panes.length < n) {
+    /** @type {Set<number>} 잘라 봤지만 최소 크기에 걸린 칸 */
+    const stuck = new Set();
+    let split = false;
+    while (!split) {
+      const target = biggest(panes, stuck);
+      if (target < 0) return null;
+      const halves = halve(panes[target], minW, minH, gap);
+      if (!halves) {
+        stuck.add(target);
+        continue;
+      }
+      panes[target] = halves[0];
+      panes.push(halves[1]);
+      split = true;
+    }
+  }
+  return panes;
 }
 
 /**
- * 메인 몫을 떼고 나머지를 고르게 나눈다. 메인이 최소 크기에 걸리면 null.
- * @param {Rect} region
- * @param {number} n
+ * 자를 칸을 고른다. 가장 넓은 칸, 비슷하면 나중에 생긴 칸.
+ * @param {Rect[]} panes
+ * @param {Set<number>} stuck 이미 못 자른다고 판명된 칸
+ * @returns {number} -1이면 후보 없음
+ */
+function biggest(panes, stuck) {
+  let best = 0;
+  for (let i = 0; i < panes.length; i++) {
+    if (stuck.has(i)) continue;
+    best = Math.max(best, panes[i].w * panes[i].h);
+  }
+  if (best === 0) return -1;
+  let pick = -1;
+  for (let i = 0; i < panes.length; i++) {
+    // 뒤에서부터 덮어쓰므로 비슷한 것들 중 마지막에 생긴 칸이 남는다.
+    if (!stuck.has(i) && panes[i].w * panes[i].h >= best * (1 - AREA_TIE)) pick = i;
+  }
+  return pick;
+}
+
+/**
+ * 한 칸을 반으로 자른다. 열을 먼저 시도하고, 최소 폭에 걸리면 가로로 눕힌다.
+ * @param {Rect} r
  * @param {number} minW
  * @param {number} minH
  * @param {number} gap
- * @returns {Rect[] | null}
+ * @returns {[Rect, Rect] | null}
  */
-function carveMain(region, n, minW, minH, gap) {
-  for (const axis of ['side', 'stack']) {
-    const [main, rest] = bisect(region, axis, 1, 2, gap);
-    if (main.w < minW || main.h < minH) continue;
-    const tiled = divide(rest, n - 1, minW, minH, gap);
-    if (tiled) return [main, ...tiled];
-  }
-  return null;
-}
-
-/**
- * 한 축으로 한 번 자른다. 앞쪽이 n 칸 중 head 칸의 몫을 가져간다.
- * @param {Rect} region
- * @param {string} axis
- * @param {number} head
- * @param {number} n
- * @param {number} gap
- * @returns {[Rect, Rect]}
- */
-function bisect(region, axis, head, n, gap) {
-  if (axis === 'stack') {
-    const span = region.h - gap;
-    const h1 = Math.round((span * head) / n);
+function halve(r, minW, minH, gap) {
+  const w1 = Math.round((r.w - gap) / 2);
+  if (r.h >= minH && w1 >= minW && r.w - gap - w1 >= minW) {
     return [
-      { x: region.x, y: region.y, w: region.w, h: h1 },
-      { x: region.x, y: region.y + h1 + gap, w: region.w, h: span - h1 },
+      { x: r.x, y: r.y, w: w1, h: r.h },
+      { x: r.x + w1 + gap, y: r.y, w: r.w - gap - w1, h: r.h },
     ];
   }
-  const span = region.w - gap;
-  const w1 = Math.round((span * head) / n);
-  return [
-    { x: region.x, y: region.y, w: w1, h: region.h },
-    { x: region.x + w1 + gap, y: region.y, w: span - w1, h: region.h },
-  ];
-}
-
-/**
- * @param {Rect} region
- * @param {number} n
- * @param {number} minW
- * @param {number} minH
- * @param {number} gap
- * @returns {Rect[] | null}
- */
-function divide(region, n, minW, minH, gap) {
-  if (n === 1) return region.w >= minW && region.h >= minH ? [region] : null;
-
-  const head = Math.ceil(n / 2);
-  const tail = n - head;
-  // 열부터 시도하고, 최소 폭에 걸리면 그때 가로로 눕힌다.
-  const axes = ['side', 'stack'];
-
-  for (const axis of axes) {
-    const [first, second] = bisect(region, axis, head, n, gap);
-    const a = divide(first, head, minW, minH, gap);
-    if (!a) continue;
-    const b = divide(second, tail, minW, minH, gap);
-    if (b) return [...a, ...b];
+  const h1 = Math.round((r.h - gap) / 2);
+  if (r.w >= minW && h1 >= minH && r.h - gap - h1 >= minH) {
+    return [
+      { x: r.x, y: r.y, w: r.w, h: h1 },
+      { x: r.x, y: r.y + h1 + gap, w: r.w, h: r.h - gap - h1 },
+    ];
   }
   return null;
 }
