@@ -46,7 +46,8 @@ const BASE_CSS = `
   background-color: #141517 !important;
   pointer-events: auto !important;
 }
-#mlpp-chats .mlpp-placeholder {
+/* 개별 규칙(#mlpp-ph-N)이 이기도록 특정도를 낮게 둔다. audio.js 의 같은 주석 참고. */
+.mlpp-placeholder {
   position: absolute !important;
   z-index: 3 !important;
   display: none !important;
@@ -104,8 +105,9 @@ function place(selector, r, extra = '') {
  * @param {import('./dom.js').Hooks} hooks
  * @param {HTMLElement} chatsRoot
  * @param {ReturnType<typeof import('./chats.js').createChatManager>} chats
+ * @param {ReturnType<typeof import('./audio.js').createAudioMixer>} audio
  */
-export function startLayout(hooks, chatsRoot, chats) {
+export function startLayout(hooks, chatsRoot, chats, audio) {
   // #chat-toggle 앞에 넣어야 토글 버튼이 채팅 위에 그려진다.
   hooks.chatToggle.before(chatsRoot);
   // select는 iframe이 아니라 옮겨도 리로드되지 않는다. 페이지 JS가 들고 있는 참조도 그대로 유효하다.
@@ -253,6 +255,12 @@ export function startLayout(hooks, chatsRoot, chats) {
 
     setStyle('layout', rules.join('\n'));
     dnd.update(layout.videos);
+
+    // 오디오 오버레이는 슬롯이 아니라 방송 기준이다. 드래그로 자리가 바뀌어도 따라간다.
+    /** @type {Map<number, import('./geometry.js').Rect>} */
+    const byStream = new Map();
+    layout.videos.forEach((r, slot) => byStream.set(order[slot], r));
+    audio.update(byStream);
   }
 
   // requestAnimationFrame을 쓰지 않는다. 배경 탭에서는 rAF가 발화하지 않아 재계산이 밀린다.

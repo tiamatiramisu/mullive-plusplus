@@ -1,6 +1,6 @@
 # mullive-plusplus STATUS
 
-현재 버전: `v0.5.1` / GitHub: `tiamatiramisu/mullive-plusplus` / Greasy Fork: [593484](https://greasyfork.org/ko/scripts/593484)
+현재 버전: `v0.6.0` / GitHub: `tiamatiramisu/mullive-plusplus` / Greasy Fork: [593484](https://greasyfork.org/ko/scripts/593484)
 
 ## 스테이지
 
@@ -344,3 +344,35 @@ DOM을 건드리지 않으므로 재생이 끊기지 않는다. 열 모드에서
 | 리사이저 | `384~390`, 채팅(`384~960`) 안쪽에 겹침 |
 | `elementFromPoint(387, 화면중앙)` | `mlpp-resizer` — 채팅 iframe에 가리지 않고 잡힌다 |
 | `#chat-select` | 392부터 시작 — 잡는 영역을 가리지 않음 |
+
+### 2026-08-30 — Stage 6: 솔로 / 음소거
+
+**선행 조사** — 플레이어 번들(`LivePlayer.js`)을 받아 프로토콜을 뜯었다.
+외부 명령은 여섯 개뿐이고 음소거가 없다: `Pload` `Pplay` `Ppause` `PtoggleChat` `PsetDarkMode` `PisPlayerWatching`.
+디스패치는 화이트리스트가 아니지만(`"function"==typeof this[t.data.cmd]`) 그 클래스에 음소거 메서드가 없다.
+
+**해법** — 유저스크립트를 플레이어 iframe 안에서도 돌린다(`@match play.sooplive.*`).
+프레임 안 에이전트가 `#btn_sound`를 직접 누르고, 호버·가운데 클릭을 부모에 보고한다.
+`#btn_sound`는 토글이지만 `mute` 클래스로 상태를 읽을 수 있어 절대 상태를 맞출 수 있다.
+
+| 클릭 | 버튼 class | 툴팁 | 메인 video |
+|---|---|---|---|
+| 전 | `sound small` | 음소거(m) | `muted=false` |
+| 1회 | `sound small mute` | 음소거 해제(m) | `muted=true` |
+| 2회 | `sound small` | 음소거(m) | `muted=false` |
+
+320×240짜리 두 번째 `<video>`는 항상 muted인 광고용이라 무시한다.
+
+**찾아 고친 버그 2건**
+
+- **CSS 특정도** — 공통 규칙 `#mlpp-chats .mlpp-audio`(1,1,0)가 개별 규칙 `#mlpp-audio-N`(1,0,0)을
+  이겨 하이라이트가 영영 안 보였다. `!important`끼리는 특정도가 갈랐다.
+  같은 패턴이 채팅 자리 표시자에도 있어 **그것도 한 번도 뜬 적이 없었다**(사용자가 본 "그냥 검은색"의 정체).
+  공통 규칙에서 id 선택자를 빼 특정도를 낮췄다.
+- **호버 감지** — `mouseenter`만 쓰면 커서가 이미 그 프레임 안에 있던 상태로 시작할 때 영영 발생하지 않는다.
+  `mousemove`로도 켜고 상태가 바뀔 때만 보고하도록 고쳤다.
+
+**검증** — `https://mul.live/marronie/ecvhao/viichan6` (SOOP 3분할).
+`agents=[0,1,2]` 세 프레임 모두 핸드셰이크 성공. 가운데 클릭 → `pinned=[0] muted=[1,2]`,
+해당 타일 파랑·나머지 빨강으로 표시되고 다른 두 플레이어가 실제로 음소거됐다.
+페인트 순서 `mlpp-glow → streams → chat-container → mlpp-chats → chat-toggle` 확인.
