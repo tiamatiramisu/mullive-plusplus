@@ -5,16 +5,20 @@ import * as settings from './settings.js';
  * 솔로 / 음소거.
  *
  * 오인페·DAW의 솔로처럼 동작한다. **들리는 것 = 고정 ∪ 호버**.
- * - 아무것도 없으면 전부 들린다(일반). 테두리도 그리지 않는다.
+ * - 아무것도 없으면 전부 들린다(일반).
  * - 하나라도 있으면 그 집합만 들리고 나머지는 음소거된다.
  * - 고정은 여러 개 가능하다. 여러 방송을 동시에 들을 수 있다.
+ *
+ * 하이라이트는 **들리는 쪽에만** 붙고 호버와 무관하게 계속 보인다.
+ * 기본 상태(모두 들림)와 음소거된 화면에는 아무것도 그리지 않는다.
  *
  * 플레이어는 교차 출처라 여기서 직접 음소거할 수 없다. 프레임 안의 에이전트에 명령을 보낸다.
  * 호버와 가운데 클릭도 마찬가지로 에이전트가 보고해 준다(iframe이 포인터 이벤트를 삼키므로).
  */
 
 const SOLO_GLOW = 'rgba(76, 141, 255, 0.5)';
-const MUTED_GLOW = 'rgba(255, 77, 77, 0.45)';
+/** 파동은 바탕보다 진해야 눈에 띈다. */
+const SOLO_RIPPLE = 'rgba(96, 155, 255, 0.95)';
 /** 실제 소리를 안 쓸 때 파동을 쏘는 주기 */
 const PULSE_PERIOD_MS = 1500;
 /** 타일마다 조금씩 어긋나게 쏴서 한 덩어리로 튀지 않게 한다. */
@@ -23,12 +27,8 @@ const PULSE_STAGGER_MS = 170;
 // 기본 규칙의 특정도를 개별 규칙(#mlpp-audio-N, 특정도 1,0,0)보다 낮게 유지해야 한다.
 // `#mlpp-chats .mlpp-audio`(1,1,0)로 쓰면 !important끼리 붙어도 기본 규칙이 이겨 영영 안 보인다.
 //
-// 테두리가 아니라 바깥으로 번지는 짧은 그라데이션을 쓴다. box-shadow는 요소 박스 **밖에만**
+// 테두리가 아니라 바깥으로 번지는 그라데이션을 쓴다. box-shadow는 요소 박스 **밖에만**
 // 그려지므로 영상 화면을 조금도 가리지 않는다. 배경과 테두리는 두지 않는다.
-//
-// 하이라이트는 영상 iframe **뒤에** 그려야 한다. 그래야 이웃 화면을 가리지 않는다.
-// z-index로는 안 된다 — 채팅 컨테이너와 마찬가지로 #streams 보다 DOM에서 앞에 놓아
-// 페인트 순서로 뒤로 보낸다. 그 대신 타일 사이에 여백을 만들지 않는다.
 const BASE_CSS = `
 #mlpp-glow {
   position: absolute !important;
@@ -48,12 +48,15 @@ const BASE_CSS = `
   box-shadow: 0 0 14px 3px var(--mlpp-glow, transparent) !important;
 }
 /* 파동은 별도 자식이 맡는다. 바탕 글로우와 box-shadow 가 서로 덮어쓰지 않게 하려는 것이다.
-   peak 순간마다 한 발씩 쏘고, 애니메이션이 끝나면 사라진다. */
+   peak 순간마다 한 발씩 쏘고, 애니메이션이 끝나면 사라진다.
+
+   opacity 에 !important 를 붙이면 안 된다. CSS 캐스케이드에서 important 선언은
+   애니메이션보다 우선이라, Web Animations 가 올린 opacity 가 0으로 눌려 영영 안 보인다. */
 .mlpp-ripple {
   position: absolute !important;
   inset: 0 !important;
-  opacity: 0 !important;
   pointer-events: none !important;
+  opacity: 0;
 }
 `;
 
@@ -116,13 +119,14 @@ export function createAudioMixer({ players, root, bus }) {
     const node = el?.querySelector('.mlpp-ripple');
     const color = colors.get(index);
     if (!node || !color || !shown.includes(index)) return;
-    const spread = Math.round(10 + strength * 22);
+    const spread = Math.round(16 + strength * 26);
     node.animate(
       [
-        { boxShadow: `0 0 1px 0px ${color}`, opacity: 0.95 },
-        { boxShadow: `0 0 6px ${spread}px ${color}`, opacity: 0 },
+        { boxShadow: `0 0 2px 0px ${color}`, opacity: 1, offset: 0 },
+        { boxShadow: `0 0 6px ${Math.round(spread * 0.45)}px ${color}`, opacity: 0.75, offset: 0.35 },
+        { boxShadow: `0 0 12px ${spread}px ${color}`, opacity: 0, offset: 1 },
       ],
-      { duration: 620, easing: 'cubic-bezier(0.2, 0.65, 0.3, 1)' },
+      { duration: 900, easing: 'cubic-bezier(0.15, 0.7, 0.3, 1)' },
     );
   }
 
@@ -147,7 +151,6 @@ export function createAudioMixer({ players, root, bus }) {
   function apply() {
     const set = active();
     const soloing = set.size > 0;
-    const fromAudio = settings.get('glowFromAudio') !== 0;
 
     players.forEach((_, index) => {
       const muted = soloing && !set.has(index);
@@ -157,22 +160,19 @@ export function createAudioMixer({ players, root, bus }) {
       }
     });
 
-    // 하이라이트는 호버 중에만, 그리고 호버한 타일과 **같은 종류만** 보여준다.
-    // 전부 칠하면 시끄럽기만 하고 정작 "지금 무엇과 한 무리인지"가 안 보인다.
-    const hoveredKind = hovered < 0 ? null : set.has(hovered) ? 'solo' : 'muted';
-
     const rules = [BASE_CSS];
     /** @type {number[]} */
     const next = [];
     for (const [index, r] of rects) {
       const el = ensureOverlay(index);
-      const kind = set.has(index) ? 'solo' : 'muted';
-      if (!soloing || hoveredKind === null || kind !== hoveredKind) {
+      // 솔로만 표시한다. 기본(모두 들림)과 음소거는 아무 표시도 하지 않는다.
+      // 호버 여부와 무관하게 계속 보인다 — 지금 무엇이 들리는지가 상시 단서여야 한다.
+      if (!soloing || !set.has(index)) {
         rules.push(`#${el.id} { display: none !important; }`);
         continue;
       }
-      const glow = kind === 'solo' ? SOLO_GLOW : MUTED_GLOW;
-      colors.set(index, glow);
+      const glow = SOLO_GLOW;
+      colors.set(index, SOLO_RIPPLE);
       next.push(index);
       rules.push(
         `#${el.id} { display: block !important; left: ${r.x}px !important; top: ${r.y}px !important;` +

@@ -1,6 +1,6 @@
 # mullive-plusplus STATUS
 
-현재 버전: `v0.14.0` / GitHub: `tiamatiramisu/mullive-plusplus` / Greasy Fork: [593484](https://greasyfork.org/ko/scripts/593484)
+현재 버전: `v0.15.0` / GitHub: `tiamatiramisu/mullive-plusplus` / Greasy Fork: [593484](https://greasyfork.org/ko/scripts/593484)
 
 ## 스테이지
 
@@ -551,3 +551,23 @@ Web Animations 로 한 발씩 재생한다. 전체를 다시 그리지 않는다
 "일정 소음"의 3발은 기준선이 잡히는 초반에만 나온다.
 
 **실제 소리를 안 쓸 때** — 부모가 1.5초 주기로, 타일마다 170ms 씩 어긋나게 파동을 보낸다.
+
+### 2026-08-30 — 하이라이트 상시 표시, 그리고 파동이 안 보이던 버그
+
+**상시 표시** — z 층을 제대로 쌓았으니 호버 게이팅을 걷어냈다.
+이제 하이라이트는 **들리는 화면에만** 붙고 계속 보인다. 기본 상태와 음소거 화면에는 아무것도 없다.
+표시가 있으면 곧 "들린다"는 뜻이라 규칙이 단순해졌다.
+
+**파동이 안 보이던 원인** — `.mlpp-ripple` 에 `opacity: 0 !important` 를 걸어둔 것.
+CSS 캐스케이드에서 **important 선언은 애니메이션보다 우선**이라,
+Web Animations 가 올린 opacity 가 계속 0으로 눌려 영영 보이지 않았다.
+`!important` 를 떼서 고쳤다. 우리가 만든 요소라 페이지 스타일과 겨룰 일이 없어 붙일 이유도 없었다.
+
+거기에 파동은 `shown` 목록의 타일에만 쏘는데 그 목록이 호버 중에만 채워졌으니 이중으로 막혀 있었다.
+상시 표시로 바꾸면서 함께 풀렸다.
+
+**보이게 다듬은 것** — 파동 색을 바탕(alpha 0.5)보다 진한 alpha 0.95 로,
+지속 620ms → 900ms, 최대 확산 32px → 42px, 중간 지점(35%)을 넣어 선이 퍼지는 느낌을 살렸다.
+
+**검증** — `.mlpp-ripple` 에 시험 애니메이션을 걸어 computed opacity 가 1까지 오르는 것을 확인.
+솔로 상태에서 `mlpp-audio-3` 만 `block`, 음소거된 0·1·2 는 `none`.
