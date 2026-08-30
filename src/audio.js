@@ -86,6 +86,10 @@ export function createAudioMixer({ players, root, bus }) {
   const agents = new Set();
   /** @type {number[]} 지금 하이라이트가 보이는 타일들 */
   let shown = [];
+  /** @type {Map<number, number>} 타일별로 마지막에 파동을 쏜 시각 */
+  const lastRipple = new Map();
+  /** @type {Set<number>} 소리 분석에 성공한 프레임. 진단용. */
+  const analysers = new Set();
   /**
    * 마스터가 되면서 **우리가** 솔로에 넣은 방송.
    * 마스터를 풀 때 되돌리려면 원래 솔로였는지를 기억해야 한다. -1이면 없음.
@@ -127,6 +131,7 @@ export function createAudioMixer({ players, root, bus }) {
     const node = el?.querySelector('.mlpp-ripple');
     if (!node || !shown.includes(index)) return;
     // 선은 제자리에 두고 밝기만 움직인다. 세기는 최고 불투명도로 나타낸다.
+    lastRipple.set(index, Date.now());
     const peak = RIPPLE_OPACITY * (0.6 + strength * 0.4);
     node.animate(
       [
@@ -138,15 +143,27 @@ export function createAudioMixer({ players, root, bus }) {
     );
   }
 
-  /** 실제 소리를 안 쓸 때는 일정 주기로 파동을 보낸다. */
+  /**
+   * 주기 파동. 실제 소리를 쓰든 안 쓰든 **항상** 돈다.
+   * 최근에 소리로 쏜 타일만 건너뛴다.
+   *
+   * 소리를 쓸 때 이 타이머를 꺼버리면, 분석이 실패했을 때(플레이어가 이미 오디오 소스를 잡았거나
+   * 재생이 아직 안 시작된 경우) 파동이 하나도 안 나와 하이라이트가 통째로 사라진다.
+   * 고정 표시를 없앤 뒤로는 그게 곧 "솔로 표시 없음"이 된다.
+   */
   function retimePulses() {
     if (pulseTimer) {
       clearInterval(pulseTimer);
       pulseTimer = 0;
     }
-    if (settings.get('glowPulse') === 0 || settings.get('glowFromAudio') !== 0) return;
+    if (settings.get('glowPulse') === 0) return;
     pulseTimer = setInterval(() => {
-      shown.forEach((index, i) => setTimeout(() => ripple(index, 0.55), i * PULSE_STAGGER_MS));
+      shown.forEach((index, i) =>
+        setTimeout(() => {
+          if (Date.now() - (lastRipple.get(index) ?? 0) < PULSE_PERIOD_MS * 0.9) return;
+          ripple(index, 0.55);
+        }, i * PULSE_STAGGER_MS),
+      );
     }, PULSE_PERIOD_MS);
   }
 
@@ -192,7 +209,7 @@ export function createAudioMixer({ players, root, bus }) {
       `pinned=[${[...pinned].join(',')}] hovered=${hovered} muted=[${players
         .map((_, i) => (soloing && !set.has(i) ? i : null))
         .filter((i) => i !== null)
-        .join(',')}] agents=[${[...agents].join(',')}]`;
+        .join(',')}] agents=[${[...agents].join(',')}] analysers=[${[...analysers].join(',')}]`;
   }
 
   bus.on((index, data) => {
@@ -211,6 +228,12 @@ export function createAudioMixer({ players, root, bus }) {
       case 'beat':
         // 프레임이 소리에서 peak을 잡아 보낸 순간이다.
         if (settings.get('glowPulse') !== 0) ripple(index, Math.max(0, Math.min(1, Number(data.strength) || 0)));
+        break;
+      case 'analyser':
+        // 소리 분석을 걸 수 있었는지. 실패해도 주기 파동이 있어 표시는 유지된다.
+        if (data.ok) analysers.add(index);
+        else analysers.delete(index);
+        apply();
         break;
       case 'hover':
         if (data.on) hovered = index;

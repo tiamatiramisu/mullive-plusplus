@@ -81,6 +81,15 @@ const BASE_CSS = `
 }
 #mlpp-panel .mlpp-tab-body { display: none !important; }
 #mlpp-panel .mlpp-tab-body.mlpp-active { display: block !important; }
+#mlpp-panel .mlpp-hint {
+  margin: 0 0 14px !important;
+  padding: 8px 10px !important;
+  border-radius: 4px !important;
+  background-color: #23252a !important;
+  color: #b9bec7 !important;
+  font-size: 12px !important;
+  line-height: 1.5 !important;
+}
 #mlpp-panel .mlpp-row { margin-bottom: 12px !important; }
 #mlpp-panel .mlpp-label {
   display: flex !important;
@@ -147,13 +156,13 @@ export function createSettingsPanel(actions) {
   gear.id = 'mlpp-gear';
   gear.type = 'button';
   gear.textContent = '⚙';
-  gear.title = 'Mul.Live++ 설정';
+  gear.title = 'Mul.Live++ 관리 패널';
 
   const panel = document.createElement('div');
   panel.id = 'mlpp-panel';
 
   const title = document.createElement('h2');
-  title.textContent = 'Mul.Live++ 설정';
+  title.textContent = 'Mul.Live++ 관리 패널';
   panel.append(title);
 
   /** @type {Map<string, HTMLSelectElement | HTMLInputElement>} */
@@ -184,6 +193,13 @@ export function createSettingsPanel(actions) {
 
     const body = document.createElement('div');
     body.className = 'mlpp-tab-body';
+    const hint = settings.TAB_HINTS[name];
+    if (hint) {
+      const line = document.createElement('div');
+      line.className = 'mlpp-hint';
+      line.textContent = hint;
+      body.append(line);
+    }
     bodies.set(name, body);
   }
   panel.append(tabBar, ...bodies.values());

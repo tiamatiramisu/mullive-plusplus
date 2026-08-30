@@ -12,7 +12,7 @@ const SOOP_ORIGIN = /^https:\/\/play\.sooplive\.(com|co\.kr)$/;
 const TARGETS = ['https://play.sooplive.com', 'https://play.sooplive.co.kr'];
 
 /**
- * @typedef {{ kind?: string, on?: unknown, strength?: unknown }} FrameMessage
+ * @typedef {{ kind?: string, on?: unknown, strength?: unknown, ok?: unknown }} FrameMessage
  */
 
 /**

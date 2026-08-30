@@ -61,10 +61,11 @@ let buffer = /** @type {Uint8Array<ArrayBuffer> | null} */ (null);
 let analysing = false;
 let lastSent = 0;
 
+/** 가장 큰 video 를 고른다. 320x240 짜리는 광고용이다. */
 function mainVideo() {
   const videos = [...document.querySelectorAll('video')];
-  // 320x240 짜리는 광고용이라 실제 방송 쪽을 고른다.
-  return videos.find((v) => v.videoWidth > 400) ?? videos[0] ?? null;
+  if (videos.length === 0) return null;
+  return videos.reduce((best, v) => (v.videoWidth > best.videoWidth ? v : best), videos[0]);
 }
 
 /**
@@ -110,12 +111,20 @@ function measure() {
 }
 
 function startAnalyser() {
-  if (analysing) return;
   analysing = true;
-  requestAnimationFrame(measure);
-  if (analyser) return;
+  if (analyser) {
+    requestAnimationFrame(measure);
+    report({ kind: 'analyser', ok: true });
+    return;
+  }
+  // 재생이 시작되기 전에는 video 가 없거나 크기가 0이다. 시작될 때 한 번 더 시도한다.
   const video = mainVideo();
-  if (!video) return;
+  if (!video || video.videoWidth === 0) {
+    document.addEventListener('playing', () => analysing && startAnalyser(), { capture: true, once: true });
+    report({ kind: 'analyser', ok: false });
+    requestAnimationFrame(measure);
+    return;
+  }
   try {
     const ctx = new AudioContext();
     const source = ctx.createMediaElementSource(video);
@@ -126,16 +135,21 @@ function startAnalyser() {
     analyser.connect(ctx.destination);
     buffer = new Uint8Array(analyser.fftSize);
     ctx.resume();
+    report({ kind: 'analyser', ok: true });
   } catch {
-    // 이미 다른 곳에서 소스를 잡았거나 만들 수 없는 상태다. 조용히 포기한다.
+    // 이미 다른 곳에서 소스를 잡았거나 만들 수 없는 상태다.
+    // 부모는 주기 파동으로 계속 표시하므로 여기서 포기해도 하이라이트는 남는다.
     analyser = null;
     buffer = null;
+    report({ kind: 'analyser', ok: false });
   }
+  requestAnimationFrame(measure);
 }
 
 function stopAnalyser() {
   analysing = false;
   avg = 0;
+  report({ kind: 'analyser', ok: false });
   // 그래프는 그대로 둔다. AudioContext 를 닫으면 소리가 끊긴다.
 }
 

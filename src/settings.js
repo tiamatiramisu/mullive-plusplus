@@ -24,6 +24,17 @@ export const LAYOUT_MODES = /** @type {const} */ (['auto', 'columns', 'side']);
  * @property {string} [unit]
  */
 
+/**
+ * 탭마다 맨 위에 놓는 한 줄 안내.
+ * 호버 동작은 일부러 적지 않는다 — 쓰다 보면 저절로 알게 되는 것이라 설명이 오히려 방해가 된다.
+ * @type {Record<string, string>}
+ */
+export const TAB_HINTS = {
+  레이아웃: '휠클릭으로 한 플레이어를 확대하세요',
+  채팅: '플레이어에 우클릭해서 채팅을 전환/추가하세요',
+  사운드: '플레이어에 좌클릭해서 듣고 싶은 영상들을 지정할 수 있어요',
+};
+
 /** @type {Field[]} */
 export const SCHEMA = [
   {
