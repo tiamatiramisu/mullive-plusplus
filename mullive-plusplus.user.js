@@ -4,7 +4,7 @@
 // @name:en      Mul.Live Multiview Enhancer
 // @name:ja-JP   Mul.Live マルチビュー強化
 // @namespace    http://tampermonkey.net/
-// @version      0.20.0
+// @version      0.21.0
 // @license      MIT
 // @description       Resizable chat panel, background-persistent chats, smarter video grid layout and drag-to-swap tiles for Mul.Live.
 // @description:en    Resizable chat panel, background-persistent chats, smarter video grid layout and drag-to-swap tiles for Mul.Live.
@@ -175,6 +175,10 @@
     /** @type {const} */
     ["bottom", "right"]
   );
+  var RIGHT_CLICK_ACTIONS = (
+    /** @type {const} */
+    ["switch", "toggle"]
+  );
   var TAB_HINTS = {
     레이아웃: { label: "마스터 지정", text: "휠클릭으로 한 플레이어를 확대하세요." },
     채팅: { label: "채팅 전환", text: "플레이어에 우클릭해서 채팅을 전환/추가하세요." },
@@ -219,6 +223,16 @@
       type: "bool",
       value: 1,
       help: "휠클릭으로 마스터를 바꾸면 사이드 채팅도 그 방송으로 넘어간다."
+    },
+    {
+      key: "chatRightClick",
+      name: "우클릭 시",
+      tab: "채팅",
+      type: "enum",
+      inline: true,
+      options: ["채팅 전환", "채팅 추가/제거"],
+      value: 0,
+      help: "추가/제거를 고르면 채팅창이 쪼개져 여러 방송을 같이 본다. 이미 있는 방송을 우클릭하면 도로 빠진다."
     },
     {
       key: "audioHoverPreview",
@@ -292,6 +306,9 @@
   }
   function layoutMode() {
     return LAYOUT_MODES[get("layoutMode")] ?? "auto";
+  }
+  function rightClickAction() {
+    return RIGHT_CLICK_ACTIONS[get("chatRightClick")] ?? "switch";
   }
   function stackPlacement() {
     return STACK_PLACEMENTS[get("masterStackPlacement")] ?? "bottom";
@@ -822,6 +839,49 @@
     }
     return { mode: "master", videos, ...chrome };
   }
+  function splitChatPanes(region, n, minW, minH, gap) {
+    if (n <= 1) return [region];
+    return carveMain(region, n, minW, minH, gap) ?? divide(region, n, minW, minH, gap);
+  }
+  function carveMain(region, n, minW, minH, gap) {
+    for (const axis of ["side", "stack"]) {
+      const [main2, rest] = bisect(region, axis, 1, 2, gap);
+      if (main2.w < minW || main2.h < minH) continue;
+      const tiled = divide(rest, n - 1, minW, minH, gap);
+      if (tiled) return [main2, ...tiled];
+    }
+    return null;
+  }
+  function bisect(region, axis, head, n, gap) {
+    if (axis === "stack") {
+      const span2 = region.h - gap;
+      const h1 = Math.round(span2 * head / n);
+      return [
+        { x: region.x, y: region.y, w: region.w, h: h1 },
+        { x: region.x, y: region.y + h1 + gap, w: region.w, h: span2 - h1 }
+      ];
+    }
+    const span = region.w - gap;
+    const w1 = Math.round(span * head / n);
+    return [
+      { x: region.x, y: region.y, w: w1, h: region.h },
+      { x: region.x + w1 + gap, y: region.y, w: span - w1, h: region.h }
+    ];
+  }
+  function divide(region, n, minW, minH, gap) {
+    if (n === 1) return region.w >= minW && region.h >= minH ? [region] : null;
+    const head = Math.ceil(n / 2);
+    const tail = n - head;
+    const axes = ["side", "stack"];
+    for (const axis of axes) {
+      const [first, second] = bisect(region, axis, head, n, gap);
+      const a = divide(first, head, minW, minH, gap);
+      if (!a) continue;
+      const b = divide(second, tail, minW, minH, gap);
+      if (b) return [...a, ...b];
+    }
+    return null;
+  }
 
   // src/dnd.js
   var MODIFIER_HINT = "Alt(Option)을 누른 채 끌어서 위치 교환";
@@ -977,6 +1037,8 @@ html.mlpp-swap .mlpp-tile:hover { border-color: #7aa2f7 !important; }
   var RESIZER_WIDTH = 6;
   var SELECT_HEIGHT = 28;
   var MIN_CHAT_WIDTH = 240;
+  var MIN_PANE_WIDTH = 240;
+  var MIN_PANE_HEIGHT = 200;
   var DEFAULT_CHAT_WIDTH = 350;
   var MIN_COLUMN_WIDTH = 400;
   var TILE_GAP = 0;
@@ -1071,9 +1133,22 @@ html.mlpp-swap .mlpp-tile:hover { border-color: #7aa2f7 !important; }
     chatsRoot.append(resizer);
     let timer = 0;
     let chatVisible = true;
-    let committed = chats.firstUsable();
+    let panes = [chats.firstUsable()].filter((i) => i >= 0);
     let preview = -1;
-    const activeChat = () => preview >= 0 && get("chatHoverPreview") !== 0 ? preview : committed;
+    let chatRegion = (
+      /** @type {import('./geometry.js').Rect | null} */
+      null
+    );
+    function visiblePanes() {
+      const base = panes.filter((i) => chats.usable.includes(i));
+      if (preview < 0 || get("chatHoverPreview") === 0 || base.includes(preview)) return base;
+      if (base.length === 0) return [preview];
+      return [...base.slice(0, -1), preview];
+    }
+    function paneRoom(n) {
+      if (n <= 1) return true;
+      return !chatRegion || splitChatPanes(chatRegion, n, MIN_PANE_WIDTH, MIN_PANE_HEIGHT, TILE_GAP) !== null;
+    }
     let master = -1;
     let ignoreHoverUntil = 0;
     let slotStream = (
@@ -1094,6 +1169,31 @@ html.mlpp-swap .mlpp-tile:hover { border-color: #7aa2f7 !important; }
       },
       schedule: () => schedule()
     });
+    function showPane(index) {
+      if (rightClickAction() === "switch") {
+        panes = [index];
+        return;
+      }
+      const next = [index, ...panes.filter((i) => i !== index)];
+      panes = paneRoom(next.length) ? next : next.slice(0, Math.max(1, panes.length));
+    }
+    function togglePane(index) {
+      if (!chatVisible) {
+        chatVisible = true;
+        if (!panes.includes(index)) panes.push(index);
+        return;
+      }
+      if (panes.includes(index)) {
+        const rest = panes.filter((i) => i !== index);
+        if (rest.length === 0) {
+          chatVisible = false;
+          return;
+        }
+        panes = rest;
+        return;
+      }
+      if (paneRoom(panes.length + 1)) panes.push(index);
+    }
     function resetOrder() {
       master = -1;
       audio.setMaster(-1);
@@ -1138,17 +1238,26 @@ html.mlpp-swap .mlpp-tile:hover { border-color: #7aa2f7 !important; }
       slotStream = layout.mode === "master" ? [master, ...order.filter((stream) => stream !== master)] : order;
       const columns = layout.mode === "columns";
       const parked = { x: W - cw, y: SELECT_HEIGHT, w: cw, h: Math.max(1, H - SELECT_HEIGHT) };
-      const current = activeChat();
-      const visible = columns ? chats.usable : chatVisible && current >= 0 ? [current] : [];
+      const region = columns ? null : layout.chats[0] ?? null;
+      chatRegion = region;
+      let visible = columns ? chats.usable : chatVisible ? visiblePanes() : [];
       const slots = /* @__PURE__ */ new Map();
       if (columns) {
         layout.chats.forEach((r, slot) => {
           const stream = slotStream[slot];
           if (visible.includes(stream)) slots.set(stream, r);
         });
-      } else if (visible.length > 0 && layout.chats[0]) {
-        slots.set(visible[0], layout.chats[0]);
+      } else if (visible.length > 0 && region) {
+        let rects = null;
+        while (visible.length > 1 && !(rects = splitChatPanes(region, visible.length, MIN_PANE_WIDTH, MIN_PANE_HEIGHT, gap))) {
+          visible = visible.slice(0, -1);
+        }
+        if (!rects) rects = [region];
+        visible.forEach((stream, i) => {
+          if (rects[i]) slots.set(stream, rects[i]);
+        });
       }
+      const current = visible[0] ?? -1;
       const states = chats.sync(visible, get("chatLimit"));
       const rules = [BASE_CSS3];
       layout.videos.forEach((r, slot) => {
@@ -1191,7 +1300,7 @@ html.mlpp-swap .mlpp-tile:hover { border-color: #7aa2f7 !important; }
       rules.push(`#chat-toggle .open { display: ${chatVisible ? "none" : "inline"} !important; }`);
       rules.push(`#chat-toggle .close { display: ${chatVisible ? "inline" : "none"} !important; }`);
       setStyle("layout", rules.join("\n"));
-      document.documentElement.dataset.mlppLayout = `mode=${layout.mode} master=${master} chat=${current} slots=[${slotStream.join(",")}] grid=${forceCols}x${forceRows} setting=${mode2} stack=${stackPlacement()}`;
+      document.documentElement.dataset.mlppLayout = `mode=${layout.mode} master=${master} chat=${visible.join("+") || -1} panes=[${panes.join(",")}] rc=${rightClickAction()} slots=[${slotStream.join(",")}] grid=${forceCols}x${forceRows} setting=${mode2} stack=${stackPlacement()}`;
       dnd.update(layout.videos);
       const byStream = /* @__PURE__ */ new Map();
       layout.videos.forEach((r, slot) => byStream.set(slotStream[slot], r));
@@ -1208,9 +1317,9 @@ html.mlpp-swap .mlpp-tile:hover { border-color: #7aa2f7 !important; }
         e.stopPropagation();
         if (hooks.chatSelect.value === "about:blank") {
           chatVisible = false;
-          if (committed >= 0) hooks.chatSelect.selectedIndex = committed;
+          if (panes[0] >= 0) hooks.chatSelect.selectedIndex = panes[0];
         } else {
-          committed = hooks.chatSelect.selectedIndex;
+          panes = [hooks.chatSelect.selectedIndex];
           preview = -1;
           chatVisible = true;
         }
@@ -1242,9 +1351,9 @@ html.mlpp-swap .mlpp-tile:hover { border-color: #7aa2f7 !important; }
       shield?.remove();
       shield = null;
       if (dragWidth !== null) {
-        const committed2 = chatWidth();
+        const committed = chatWidth();
         dragWidth = null;
-        set("chatWidth", committed2);
+        set("chatWidth", committed);
       }
       schedule();
     }
@@ -1273,7 +1382,7 @@ html.mlpp-swap .mlpp-tile:hover { border-color: #7aa2f7 !important; }
         if (master >= 0) {
           ignoreHoverUntil = Date.now() + HOVER_GRACE_MS;
           preview = -1;
-          if (get("masterFollowsChat") && chats.usable.includes(master)) committed = master;
+          if (get("masterFollowsChat") && chats.usable.includes(master)) showPane(master);
         }
         audio.setMaster(master);
         schedule();
@@ -1292,9 +1401,13 @@ html.mlpp-swap .mlpp-tile:hover { border-color: #7aa2f7 !important; }
         }
         schedule();
       } else if (data.kind === "commit") {
-        committed = index;
         preview = -1;
-        chatVisible = true;
+        if (rightClickAction() === "switch") {
+          panes = [index];
+          chatVisible = true;
+        } else {
+          togglePane(index);
+        }
         schedule();
       }
     });
@@ -1432,6 +1545,8 @@ html.mlpp-swap .mlpp-tile:hover { border-color: #7aa2f7 !important; }
   outline: none !important;
 }
 #mlpp-panel select { width: 100% !important; }
+/* 이름 오른쪽에 붙는 enum. 줄 전체를 쓰지 않는다. */
+#mlpp-panel .mlpp-label select { width: auto !important; max-width: 62% !important; }
 #mlpp-panel input[type="number"] { width: 88px !important; text-align: right !important; }
 #mlpp-panel input[type="checkbox"] {
   width: 15px !important;
@@ -1571,6 +1686,7 @@ html.mlpp-swap .mlpp-tile:hover { border-color: #7aa2f7 !important; }
           select.append(option);
         });
         control = select;
+        if (field.inline) label.append(select);
       } else {
         const input = document.createElement("input");
         input.type = "number";
@@ -1590,7 +1706,7 @@ html.mlpp-swap .mlpp-tile:hover { border-color: #7aa2f7 !important; }
       control.addEventListener("change", commit2);
       controls.set(field.key, control);
       row.append(label);
-      if (field.type === "enum") row.append(control);
+      if (field.type === "enum" && !field.inline) row.append(control);
       if (field.help) {
         const help = document.createElement("div");
         help.className = "mlpp-help";
