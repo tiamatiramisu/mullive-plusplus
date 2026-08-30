@@ -220,7 +220,8 @@ export function startPlayerAgent() {
       if (!parentOrigin || !inCenter(e)) return;
       e.stopPropagation();
       e.preventDefault();
-      report({ kind: 'toggle' });
+      // 부모는 프레임 안 좌표를 알 수 없다. 알림을 커서 옆에 띄우려면 같이 보내야 한다.
+      report({ kind: 'toggle', x: e.clientX, y: e.clientY });
     },
     true,
   );
@@ -233,7 +234,7 @@ export function startPlayerAgent() {
       if (!parentOrigin || !inCenter(e)) return;
       e.stopPropagation();
       e.preventDefault();
-      report({ kind: 'commit', shift: e.shiftKey });
+      report({ kind: 'commit', shift: e.shiftKey, x: e.clientX, y: e.clientY });
     },
     true,
   );

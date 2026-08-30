@@ -1,6 +1,6 @@
 # mullive-plusplus STATUS
 
-현재 버전: `v0.22.0` / GitHub: `tiamatiramisu/mullive-plusplus` / Greasy Fork: [593484](https://greasyfork.org/ko/scripts/593484)
+현재 버전: `v0.23.0` / GitHub: `tiamatiramisu/mullive-plusplus` / Greasy Fork: [593484](https://greasyfork.org/ko/scripts/593484)
 
 ## 스테이지
 
@@ -43,6 +43,34 @@ Stage 1(업스트림 분석)은 `SPEC.md`로 완료.
   현행(채팅 1개)에서도 발생하는 문제이며, Stage 3에서 채팅 iframe이 늘 때 빈도를 관측할 것.
 
 ## 검증 로그
+
+### 2026-08-30 — v0.23.0 조작 알림 · 드롭다운 정리 · 첫 사용 안내
+
+**토스트.** 커서 왼쪽 위 6px 에 기호를 900ms 띄운다(➕S ➖S ➕💬 ➖💬 🔄💬).
+바뀐 게 없으면 띄우지 않는다 — `switchPane`/`togglePane` 이 기호를 돌려주고 null 이면 조용하다.
+부모는 프레임 안 좌표를 모르므로 에이전트가 `clientX/clientY` 를 실어 보내고
+부모가 타일 원점을 더한다. 실측: 좌클릭 뒤 `➕S` 가 우하단 (996,210) 에 떴다.
+클릭 지점이 (1002,216) 이었으니 정확히 6px 좌상단이다.
+
+**지우기는 타이머로.** 처음엔 `animation.finished` 로 지웠는데,
+배경 탭에서는 애니메이션이 진행되지 않아 그 약속이 영영 안 풀린다.
+`layout.js` 가 rAF 를 피하는 것과 같은 함정이라 `setTimeout` 으로 바꿨다.
+실측: 클릭 0.5초·1.3초 뒤 남은 노드 0.
+
+**페이지 드롭다운 제거.** `#chat-select` 를 `display: none` 으로 상시 감춘다(실측 확인).
+값은 계속 첫 칸에 맞춰 둔다 — 드래그 라벨이 이 select 의 옵션 텍스트를 읽는다.
+
+**첫 사용 안내.** `panelSeen`(숨은 기본값 0)이 0이면 톱니에 `mlpp-attract` 를 건다.
+`opacity` 가 기본 규칙에서 `!important` 라 애니메이션으로는 못 이기므로,
+특정도 한 단계 높은 규칙으로 값을 고정하고 애니메이션은 `box-shadow` 만 건드린다.
+실측: 로드 직후 `attract=true` 이고 `animationName` 이 `mlpp-attract` 로 잡힌다(규칙이 실제로 먹었다는 뜻).
+패널을 한 번 열면 `attract=false`.
+
+**자동화 한계 — 우클릭은 교차 출처 프레임에 닿지 않는다.**
+같은 좌표에 좌클릭은 프레임까지 가서 솔로가 토글되는데(`pinned` 변화 + 토스트 확인),
+우클릭은 `message` 리스너에 로그가 0건이다. 도구가 OOPIF 로 `contextmenu` 를 못 보낸다.
+게다가 `computer` 의 좌표계가 CSS 픽셀과 어긋나 의도한 타일이 아닌 곳에 떨어지는 일이 잦다.
+**우클릭·휠클릭 경로는 사용자 조작으로만 검증된다.** 기하와 상태 기계는 node 단위 검증으로 덮는다.
 
 ### 2026-08-30 — v0.22.0 Shift+우클릭 · LIFO 전환 · 분할 규칙 확정
 

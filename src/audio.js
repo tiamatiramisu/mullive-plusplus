@@ -1,5 +1,6 @@
 import { setStyle } from './style.js';
 import * as settings from './settings.js';
+import { showToast } from './toast.js';
 
 /**
  * 솔로 / 음소거.
@@ -241,13 +242,19 @@ export function createAudioMixer({ players, root, bus }) {
         else if (hovered === index) hovered = -1;
         apply();
         break;
-      case 'toggle':
-        if (pinned.has(index)) pinned.delete(index);
-        else pinned.add(index);
+      case 'toggle': {
+        const added = !pinned.has(index);
+        if (added) pinned.add(index);
+        else pinned.delete(index);
         // 직접 건드린 순간부터는 사용자 것이다. 마스터를 풀어도 되돌리지 않는다.
         if (masterAutoPinned === index) masterAutoPinned = -1;
+        const rect = rects.get(index);
+        if (rect) {
+          showToast(added ? '➕S' : '➖S', rect.x + Number(data.x ?? rect.w / 2), rect.y + Number(data.y ?? rect.h / 2));
+        }
         apply();
         break;
+      }
     }
   });
 

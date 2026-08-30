@@ -2,6 +2,7 @@ import { setStyle } from './style.js';
 import * as settings from './settings.js';
 import { columnLayout, masterStackLayout, sideLayout, splitChatPanes } from './geometry.js';
 import { createDragSwap } from './dnd.js';
+import { showToast } from './toast.js';
 
 /**
  * 배치 적용과 사용자 조작.
@@ -71,12 +72,9 @@ const BASE_CSS = `
   font-size: 14px !important;
   pointer-events: none !important;
 }
-#chat-select {
-  position: absolute !important;
-  z-index: 6 !important;
-  margin: 0 !important;
-  pointer-events: auto !important;
-}
+/* 페이지의 채팅 드롭다운은 감춘다. 우클릭과 설정 패널이 그 일을 대신한다.
+   값은 계속 맞춰 둔다 — 드래그 라벨이 이 select 의 옵션 텍스트를 읽는다. */
+#chat-select { display: none !important; }
 /* 잡는 영역은 세로 전체로 넓게 두되, 보이는 것은 가운데의 짧은 그립뿐이다.
    막대를 세로로 길게 그리면 영상과 채팅 사이에 경계선이 생겨 눈에 거슬린다. */
 #mlpp-resizer {
@@ -168,6 +166,8 @@ export function startLayout(hooks, chatsRoot, chats, audio, bus) {
   let master = -1;
   /** 이 시각 전에 오는 호버 한 번은 무시한다. 마스터 전환 직후의 자리바꿈 때문에 생긴다. */
   let ignoreHoverUntil = 0;
+  /** 마지막 렌더의 방송별 화면 위치. 프레임이 보낸 클릭 좌표를 문서 좌표로 옮기는 데 쓴다. */
+  let videoRects = /** @type {Map<number, import('./geometry.js').Rect>} */ (new Map());
   /** 지금 첫 칸을 마스터 자격으로 차지한 방송. -1이면 없음. */
   let masterChat = -1;
   /** 그 칸을 우리가 새로 만든 것인가. 원래 켜 두었던 것이면 마스터를 풀어도 남긴다. */
@@ -229,18 +229,33 @@ export function startLayout(hooks, chatsRoot, chats, audio, bus) {
    *
    * 호버 미리보기가 노리는 칸과 같은 자리다. 넘겨보다 우클릭하면 보고 있던 그 자리에 그대로 확정된다.
    * @param {number} index
+   * @returns {string | null} 알릴 기호. 바뀐 게 없으면 null
    */
   function switchPane(index) {
     chatVisible = true;
-    if (panes.includes(index)) return;
+    if (panes.includes(index)) return null;
     if (panes[panes.length - 1] === masterChat) masterChat = -1;
     panes = panes.length === 0 ? [index] : [...panes.slice(0, -1), index];
+    return '\u{1F504}\u{1F4AC}';
+  }
+
+  /**
+   * 프레임이 보낸 클릭 좌표를 문서 좌표로 옮겨 그 자리에 알림을 띄운다.
+   * @param {number} index
+   * @param {import('./frames.js').FrameMessage} data
+   * @param {string} text
+   */
+  function toastAt(index, data, text) {
+    const r = videoRects.get(index);
+    if (!r) return;
+    showToast(text, r.x + (Number(data.x) || r.w / 2), r.y + (Number(data.y) || r.h / 2));
   }
 
   /**
    * Shift+우클릭 추가/제거. 마지막 칸을 빼면 채팅 패널 자체를 접는다(타일링 WM에서 마지막 창을 닫는 것과 같다).
    * 접힌 상태에서 우클릭하면 다시 편다.
    * @param {number} index
+   * @returns {string | null} 알릴 기호. 바뀐 게 없으면 null
    */
   function togglePane(index) {
     // 직접 건드린 순간부터는 사용자 것이다. 마스터를 풀어도 되돌리지 않는다.
@@ -248,21 +263,23 @@ export function startLayout(hooks, chatsRoot, chats, audio, bus) {
     if (!chatVisible) {
       chatVisible = true;
       if (!panes.includes(index)) panes.push(index);
-      return;
+      return '➕\u{1F4AC}';
     }
     if (panes.includes(index)) {
       const rest = panes.filter((i) => i !== index);
       if (rest.length === 0) {
         // 다시 펼 때 빈 패널이 나오지 않게 목록은 남겨 둔다.
         chatVisible = false;
-        return;
+        return '➖\u{1F4AC}';
       }
       if (index === masterChat) masterChat = -1;
       panes = rest;
-      return;
+      return '➖\u{1F4AC}';
     }
     // 자리가 없으면 조용히 무시한다. 억지로 넣으면 있던 칸들까지 못 쓰게 된다.
-    if (paneRoom(panes.length + 1)) panes.push(index);
+    if (!paneRoom(panes.length + 1)) return null;
+    panes.push(index);
+    return '➕\u{1F4AC}';
   }
 
   /** 드래그 교환 순서를 기본으로 되돌린다. */
@@ -385,22 +402,10 @@ export function startLayout(hooks, chatsRoot, chats, audio, bus) {
       rules.push(place(selector, slot, extra));
     }
 
-    if (columns || !chatVisible) {
-      rules.push('#chat-select { display: none !important; }');
-      rules.push('#mlpp-resizer { display: none !important; }');
-    } else {
-      const panel = layout.chats[0];
-      rules.push('#chat-select { display: block !important; }');
-      // 호버 미리보기 중에도 드롭다운이 지금 보이는 채팅을 가리키게 한다.
-      if (current >= 0 && hooks.chatSelect.selectedIndex !== current) hooks.chatSelect.selectedIndex = current;
-      if (panel) {
-        // 리사이저가 채팅 왼쪽 끝에 겹쳐 있으므로 select를 그만큼 밀어 잡는 영역을 가리지 않게 한다.
-        const left = panel.x + RESIZER_WIDTH + 2;
-        const w = Math.max(40, panel.w - RESIZER_WIDTH - 6);
-        rules.push(`#chat-select { left: ${left}px !important; top: 4px !important; width: ${w}px !important; }`);
-      }
-      if (layout.resizer) rules.push(place('#mlpp-resizer', layout.resizer, 'display: block !important;'));
-    }
+    // 감춰 두었어도 값은 첫 칸에 맞춰 둔다. 드래그 라벨이 이 select 를 읽는다.
+    if (current >= 0 && hooks.chatSelect.selectedIndex !== current) hooks.chatSelect.selectedIndex = current;
+    if (columns || !chatVisible) rules.push('#mlpp-resizer { display: none !important; }');
+    else if (layout.resizer) rules.push(place('#mlpp-resizer', layout.resizer, 'display: block !important;'));
 
     // 토글 아이콘은 페이지가 #chat의 src로 판단하지만 우리는 #chat을 비워두므로 직접 정한다.
     rules.push(`#chat-toggle .open { display: ${chatVisible ? 'none' : 'inline'} !important; }`);
@@ -420,6 +425,7 @@ export function startLayout(hooks, chatsRoot, chats, audio, bus) {
     /** @type {Map<number, import('./geometry.js').Rect>} */
     const byStream = new Map();
     layout.videos.forEach((r, slot) => byStream.set(slotStream[slot], r));
+    videoRects = byStream;
     audio.update(byStream);
   }
 
@@ -544,8 +550,9 @@ export function startLayout(hooks, chatsRoot, chats, audio, bus) {
       schedule();
     } else if (data.kind === 'commit') {
       preview = -1;
-      if (data.shift) togglePane(index);
-      else switchPane(index);
+      const done = data.shift ? togglePane(index) : switchPane(index);
+      // 바뀐 게 없으면 알리지 않는다.
+      if (done) toastAt(index, data, done);
       schedule();
     }
   });

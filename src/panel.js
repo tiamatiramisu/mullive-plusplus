@@ -32,6 +32,16 @@ const BASE_CSS = `
   transition: opacity 120ms ease-in-out, background-color 120ms ease-in-out !important;
 }
 #mlpp-gear:hover, #mlpp-gear.mlpp-open { opacity: 1 !important; background-color: #444 !important; }
+/* 처음 오는 사람에게만. 기본 규칙이 opacity를 !important로 잡고 있어 애니메이션으로는 못 이긴다.
+   특정도가 한 단계 높은 이 규칙으로 고정해 두고, 애니메이션은 base에 없는 box-shadow만 건드린다. */
+#mlpp-gear.mlpp-attract {
+  opacity: 1 !important;
+  animation: mlpp-attract 1.7s ease-in-out infinite !important;
+}
+@keyframes mlpp-attract {
+  0%, 100% { box-shadow: 0 0 0 0 rgba(76, 141, 255, 0); }
+  50% { box-shadow: 0 0 14px 3px rgba(76, 141, 255, 0.55); }
+}
 #mlpp-panel {
   position: fixed !important;
   top: 30px !important;
@@ -179,6 +189,8 @@ export function createSettingsPanel(actions) {
   gear.type = 'button';
   gear.textContent = '⚙';
   gear.title = 'Mul.Live++ 관리 패널';
+  // 한 번이라도 열어 봤으면 조용히 있는다.
+  if (settings.get('panelSeen') === 0) gear.classList.add('mlpp-attract');
 
   const panel = document.createElement('div');
   panel.id = 'mlpp-panel';
@@ -365,6 +377,8 @@ export function createSettingsPanel(actions) {
     sync();
     panel.classList.add('mlpp-open');
     gear.classList.add('mlpp-open');
+    gear.classList.remove('mlpp-attract');
+    if (settings.get('panelSeen') === 0) settings.set('panelSeen', 1);
   }
 
   function close() {

@@ -145,9 +145,10 @@ export const SCHEMA = [
 /**
  * 패널에 노출하지 않지만 저장은 되는 값.
  * 사이드 채팅 폭은 리사이저 핸들로 조절하므로 숫자 입력칸이 따로 필요 없다.
+ * `panelSeen` 은 톱니 버튼을 한 번이라도 눌렀는지. 처음 오는 사람에게만 반짝인다.
  */
 /** @type {Record<string, number>} */
-const HIDDEN_DEFAULTS = { chatWidth: 350 };
+const HIDDEN_DEFAULTS = { chatWidth: 350, panelSeen: 0 };
 
 /** @type {Record<string, number>} */
 const DEFAULTS = { ...Object.fromEntries(SCHEMA.map((f) => [f.key, f.value])), ...HIDDEN_DEFAULTS };
