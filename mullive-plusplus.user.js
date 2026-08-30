@@ -4,7 +4,7 @@
 // @name:en      Mul.Live Multiview Enhancer
 // @name:ja-JP   Mul.Live マルチビュー強化
 // @namespace    http://tampermonkey.net/
-// @version      0.16.1
+// @version      0.16.2
 // @license      MIT
 // @description       Resizable chat panel, background-persistent chats, smarter video grid layout and drag-to-swap tiles for Mul.Live.
 // @description:en    Resizable chat panel, background-persistent chats, smarter video grid layout and drag-to-swap tiles for Mul.Live.
@@ -406,7 +406,6 @@
   // src/audio.js
   var SOLO_COLOR = "rgb(96, 155, 255)";
   var RIPPLE_OPACITY = 0.6;
-  var RIPPLE_TRAVEL = 15;
   var RIPPLE_DURATION_MS = 1300;
   var PULSE_PERIOD_MS = 1500;
   var PULSE_STAGGER_MS = 170;
@@ -428,9 +427,8 @@
   border: 0 !important;
   pointer-events: none !important;
 }
-/* 파동은 outline 과 outline-offset 으로 그린다.
-   box-shadow 의 spread 는 면을 채워서 사각형이 커지는 것처럼 보인다.
-   outline 은 두께가 그대로인 선이라, offset 만 키우면 선 하나가 밖으로 이동한다.
+/* 파동은 테두리에 고정된 선이 밝아졌다 사라지는 형태다. 선이 움직이지는 않는다.
+   outline 을 쓰는 이유는 box-shadow 의 spread 가 면을 채워 사각형처럼 보이기 때문이고,
    outline 은 레이아웃에 영향을 주지 않아 이웃을 밀지도 않는다.
 
    opacity 에 !important 를 붙이면 안 된다. CSS 캐스케이드에서 important 선언은
@@ -475,12 +473,12 @@
       const el = overlays.get(index);
       const node = el?.querySelector(".mlpp-ripple");
       if (!node || !shown.includes(index)) return;
-      const travel = Math.round(RIPPLE_TRAVEL * (0.6 + strength * 0.4));
+      const peak = RIPPLE_OPACITY * (0.6 + strength * 0.4);
       node.animate(
         [
-          { outlineOffset: "0px", opacity: RIPPLE_OPACITY, offset: 0 },
-          { outlineOffset: `${Math.round(travel * 0.5)}px`, opacity: RIPPLE_OPACITY * 0.7, offset: 0.5 },
-          { outlineOffset: `${travel}px`, opacity: 0, offset: 1 }
+          { opacity: peak, offset: 0 },
+          { opacity: peak * 0.7, offset: 0.5 },
+          { opacity: 0, offset: 1 }
         ],
         { duration: RIPPLE_DURATION_MS, easing: "cubic-bezier(0.15, 0.7, 0.3, 1)" }
       );
