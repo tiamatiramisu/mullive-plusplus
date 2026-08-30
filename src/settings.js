@@ -11,6 +11,8 @@
 export const LAYOUT_MODES = /** @type {const} */ (['auto', 'columns', 'side']);
 /** 마스터 앤 스택에서 스택이 놓이는 곳. 순서가 곧 설정 enum 인덱스다. */
 export const STACK_PLACEMENTS = /** @type {const} */ (['bottom', 'right']);
+/** 영상 우클릭이 하는 일. 순서가 곧 설정 enum 인덱스다. */
+export const RIGHT_CLICK_ACTIONS = /** @type {const} */ (['switch', 'toggle']);
 
 /**
  * @typedef {object} Field
@@ -26,6 +28,7 @@ export const STACK_PLACEMENTS = /** @type {const} */ (['bottom', 'right']);
  * @property {string} [unit]
  * @property {boolean} [indent] 바로 위 항목에 딸린 하위 설정으로 들여쓴다
  * @property {string} [group] 같은 값을 가진 이웃 항목끼리 한 상자에 가로로 묶인다
+ * @property {boolean} [inline] enum을 아랫줄이 아니라 이름 오른쪽에 붙인다
  */
 
 /**
@@ -84,6 +87,16 @@ export const SCHEMA = [
     type: 'bool',
     value: 1,
     help: '휠클릭으로 마스터를 바꾸면 사이드 채팅도 그 방송으로 넘어간다.',
+  },
+  {
+    key: 'chatRightClick',
+    name: '우클릭 시',
+    tab: '채팅',
+    type: 'enum',
+    inline: true,
+    options: ['채팅 전환', '채팅 추가/제거'],
+    value: 0,
+    help: '추가/제거를 고르면 채팅창이 쪼개져 여러 방송을 같이 본다. 이미 있는 방송을 우클릭하면 도로 빠진다.',
   },
   {
     key: 'audioHoverPreview',
@@ -178,6 +191,11 @@ export function get(key) {
 /** 레이아웃 모드는 enum이라 인덱스로 저장된다. 문자열로 바꿔 돌려준다. */
 export function layoutMode() {
   return LAYOUT_MODES[get('layoutMode')] ?? 'auto';
+}
+
+/** @returns {'switch' | 'toggle'} */
+export function rightClickAction() {
+  return RIGHT_CLICK_ACTIONS[get('chatRightClick')] ?? 'switch';
 }
 
 /** @returns {'right' | 'bottom'} */

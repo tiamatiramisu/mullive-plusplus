@@ -1,6 +1,6 @@
 import { setStyle } from './style.js';
 import * as settings from './settings.js';
-import { columnLayout, masterStackLayout, sideLayout } from './geometry.js';
+import { columnLayout, masterStackLayout, sideLayout, splitChatPanes } from './geometry.js';
 import { createDragSwap } from './dnd.js';
 
 /**
@@ -15,6 +15,9 @@ const RESIZER_WIDTH = 6;
 /** 사이드 모드에서 채팅 선택 select가 차지하는 높이 */
 const SELECT_HEIGHT = 28;
 const MIN_CHAT_WIDTH = 240;
+/** 쪼갠 채팅 한 칸의 하한. 이보다 작아지면 칸을 더 늘리지 않는다. */
+const MIN_PANE_WIDTH = 240;
+const MIN_PANE_HEIGHT = 200;
 const DEFAULT_CHAT_WIDTH = 350;
 /** 열 모드로 갈지 정하는 기준. 열 하나의 폭이 곧 영상 폭이자 채팅 폭이다. */
 const MIN_COLUMN_WIDTH = 400;
@@ -132,12 +135,34 @@ export function startLayout(hooks, chatsRoot, chats, audio, bus) {
   /** @type {ReturnType<typeof setTimeout> | 0} */
   let timer = 0;
   let chatVisible = true;
-  // 사이드 모드의 채팅 선택. 확정값과 호버 미리보기를 나눠 둔다.
+  // 사이드 모드의 채팅 칸. 확정 목록과 호버 미리보기를 나눠 둔다.
   // 호버로 잠깐 넘겨보다가 마우스를 떼면 원래 보던 채팅으로 돌아와야 한다.
-  let committed = chats.firstUsable();
+  let panes = [chats.firstUsable()].filter((i) => i >= 0);
   let preview = -1;
-  // 설정을 끄면 즉시 확정값으로 돌아간다. preview 는 그대로 둬도 참조되지 않는다.
-  const activeChat = () => (preview >= 0 && settings.get('chatHoverPreview') !== 0 ? preview : committed);
+  /** 마지막 렌더에서 채팅이 차지한 영역. 칸을 더 넣을 수 있는지 판단하는 데 쓴다. */
+  let chatRegion = /** @type {import('./geometry.js').Rect | null} */ (null);
+
+  /**
+   * 지금 보여야 할 채팅 목록.
+   *
+   * 호버 미리보기는 **마지막 칸만** 바꾼다. 우클릭 설정과 무관하다.
+   * 첫 칸(메인)은 건드리지 않고 칸 수도 그대로라, 잠깐 넘겨보는 동안 배치가 흔들리지 않는다.
+   */
+  function visiblePanes() {
+    const base = panes.filter((i) => chats.usable.includes(i));
+    if (preview < 0 || settings.get('chatHoverPreview') === 0 || base.includes(preview)) return base;
+    if (base.length === 0) return [preview];
+    return [...base.slice(0, -1), preview];
+  }
+
+  /**
+   * 칸을 n개까지 넣을 수 있는지. 영역을 아직 모르면 막지 않는다(렌더가 다시 줄인다).
+   * @param {number} n
+   */
+  function paneRoom(n) {
+    if (n <= 1) return true;
+    return !chatRegion || splitChatPanes(chatRegion, n, MIN_PANE_WIDTH, MIN_PANE_HEIGHT, TILE_GAP) !== null;
+  }
 
   // 마스터 앤 스택의 마스터 방송. -1이면 평범한 격자. 새로고침하면 풀린다.
   let master = -1;
@@ -164,6 +189,46 @@ export function startLayout(hooks, chatsRoot, chats, audio, bus) {
     },
     schedule: () => schedule(),
   });
+
+  /**
+   * 이 방송의 채팅을 화면에 올린다. 전환 모드면 자리를 대신하고, 추가/제거 모드면 첫 칸에 놓는다.
+   * @param {number} index
+   */
+  function showPane(index) {
+    if (settings.rightClickAction() === 'switch') {
+      panes = [index];
+      return;
+    }
+    // 마스터 영상의 채팅은 가장 큰 칸, 곧 첫 칸에 놓는다.
+    // 자리가 없으면 칸 수를 늘리는 대신 맨 뒤를 밀어낸다.
+    const next = [index, ...panes.filter((i) => i !== index)];
+    panes = paneRoom(next.length) ? next : next.slice(0, Math.max(1, panes.length));
+  }
+
+  /**
+   * 우클릭 추가/제거. 마지막 칸을 빼면 채팅 패널 자체를 접는다(타일링 WM에서 마지막 창을 닫는 것과 같다).
+   * 접힌 상태에서 우클릭하면 다시 편다.
+   * @param {number} index
+   */
+  function togglePane(index) {
+    if (!chatVisible) {
+      chatVisible = true;
+      if (!panes.includes(index)) panes.push(index);
+      return;
+    }
+    if (panes.includes(index)) {
+      const rest = panes.filter((i) => i !== index);
+      if (rest.length === 0) {
+        // 다시 펼 때 빈 패널이 나오지 않게 목록은 남겨 둔다.
+        chatVisible = false;
+        return;
+      }
+      panes = rest;
+      return;
+    }
+    // 자리가 없으면 조용히 무시한다. 억지로 넣으면 있던 칸들까지 못 쓰게 된다.
+    if (paneRoom(panes.length + 1)) panes.push(index);
+  }
 
   /** 드래그 교환 순서를 기본으로 되돌린다. */
   function resetOrder() {
@@ -224,8 +289,9 @@ export function startLayout(hooks, chatsRoot, chats, audio, bus) {
     // 안 보이는 채팅도 크기를 유지해야 뒤에서 계속 내려간다. 사이드 패널 자리를 빌려 쓴다.
     const parked = { x: W - cw, y: SELECT_HEIGHT, w: cw, h: Math.max(1, H - SELECT_HEIGHT) };
 
-    const current = activeChat();
-    const visible = columns ? chats.usable : chatVisible && current >= 0 ? [current] : [];
+    const region = columns ? null : layout.chats[0] ?? null;
+    chatRegion = region;
+    let visible = columns ? chats.usable : chatVisible ? visiblePanes() : [];
 
     // 지금 화면에 자리를 가진 채팅과 그 사각형. 열 모드에서는 채팅이 자기 영상을 따라간다.
     /** @type {Map<number, import('./geometry.js').Rect>} */
@@ -235,9 +301,18 @@ export function startLayout(hooks, chatsRoot, chats, audio, bus) {
         const stream = slotStream[slot];
         if (visible.includes(stream)) slots.set(stream, r);
       });
-    } else if (visible.length > 0 && layout.chats[0]) {
-      slots.set(visible[0], layout.chats[0]);
+    } else if (visible.length > 0 && region) {
+      // 창이 줄어 다 못 담게 되면 뒤에서부터 덜어낸다. 우겨넣어 전부 못 쓰게 만들지 않는다.
+      let rects = null;
+      while (visible.length > 1 && !(rects = splitChatPanes(region, visible.length, MIN_PANE_WIDTH, MIN_PANE_HEIGHT, gap))) {
+        visible = visible.slice(0, -1);
+      }
+      if (!rects) rects = [region];
+      visible.forEach((stream, i) => {
+        if (rects[i]) slots.set(stream, rects[i]);
+      });
     }
+    const current = visible[0] ?? -1;
 
     const states = chats.sync(visible, settings.get('chatLimit'));
 
@@ -299,7 +374,8 @@ export function startLayout(hooks, chatsRoot, chats, audio, bus) {
     // 어떤 배치가 왜 잡혔는지 밖에서 읽을 수 있게 남긴다.
     // 설정끼리 서로를 죽이는 상황(수동 격자가 열 모드를 끄는 등)을 눈으로 확인하기 어렵다.
     document.documentElement.dataset.mlppLayout =
-      `mode=${layout.mode} master=${master} chat=${current}` +
+      `mode=${layout.mode} master=${master} chat=${visible.join('+') || -1}` +
+      ` panes=[${panes.join(',')}] rc=${settings.rightClickAction()}` +
       ` slots=[${slotStream.join(',')}] grid=${forceCols}x${forceRows} setting=${mode}` +
       ` stack=${settings.stackPlacement()}`;
     dnd.update(layout.videos);
@@ -326,9 +402,10 @@ export function startLayout(hooks, chatsRoot, chats, audio, bus) {
       e.stopPropagation();
       if (hooks.chatSelect.value === 'about:blank') {
         chatVisible = false;
-        if (committed >= 0) hooks.chatSelect.selectedIndex = committed;
+        if (panes[0] >= 0) hooks.chatSelect.selectedIndex = panes[0];
       } else {
-        committed = hooks.chatSelect.selectedIndex;
+        // 페이지의 드롭다운은 "이 채팅을 봐라"는 뜻이다. 쪼개 놓은 것을 한 칸으로 되돌린다.
+        panes = [hooks.chatSelect.selectedIndex];
         preview = -1;
         chatVisible = true;
       }
@@ -410,7 +487,7 @@ export function startLayout(hooks, chatsRoot, chats, audio, bus) {
         // 그때 곧바로 오는 호버 한 번은 무시해야 방금 고른 마스터의 채팅이 그대로 보인다.
         ignoreHoverUntil = Date.now() + HOVER_GRACE_MS;
         preview = -1;
-        if (settings.get('masterFollowsChat') && chats.usable.includes(master)) committed = master;
+        if (settings.get('masterFollowsChat') && chats.usable.includes(master)) showPane(master);
       }
       audio.setMaster(master);
       schedule();
@@ -430,10 +507,14 @@ export function startLayout(hooks, chatsRoot, chats, audio, bus) {
       }
       schedule();
     } else if (data.kind === 'commit') {
-      // 토글이 아니다. 항상 그 방송으로 맞춘다.
-      committed = index;
       preview = -1;
-      chatVisible = true;
+      if (settings.rightClickAction() === 'switch') {
+        // 토글이 아니다. 항상 그 방송으로 맞춘다.
+        panes = [index];
+        chatVisible = true;
+      } else {
+        togglePane(index);
+      }
       schedule();
     }
   });

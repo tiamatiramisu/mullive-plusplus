@@ -136,6 +136,8 @@ const BASE_CSS = `
   outline: none !important;
 }
 #mlpp-panel select { width: 100% !important; }
+/* 이름 오른쪽에 붙는 enum. 줄 전체를 쓰지 않는다. */
+#mlpp-panel .mlpp-label select { width: auto !important; max-width: 62% !important; }
 #mlpp-panel input[type="number"] { width: 88px !important; text-align: right !important; }
 #mlpp-panel input[type="checkbox"] {
   width: 15px !important;
@@ -288,6 +290,7 @@ export function createSettingsPanel(actions) {
         select.append(option);
       });
       control = select;
+      if (field.inline) label.append(select);
     } else {
       const input = document.createElement('input');
       input.type = 'number';
@@ -322,8 +325,8 @@ export function createSettingsPanel(actions) {
 
     controls.set(field.key, control);
     row.append(label);
-    // enum은 폭을 다 쓰므로 라벨 아래 줄에 둔다. 숫자는 위에서 이미 라벨 안에 붙였다.
-    if (field.type === 'enum') row.append(control);
+    // enum은 폭을 다 쓰므로 라벨 아래 줄에 둔다. inline과 숫자는 위에서 이미 라벨 안에 붙였다.
+    if (field.type === 'enum' && !field.inline) row.append(control);
 
     if (field.help) {
       const help = document.createElement('div');
