@@ -4,7 +4,7 @@
 // @name:en      Mul.Live Multiview Enhancer
 // @name:ja-JP   Mul.Live マルチビュー強化
 // @namespace    http://tampermonkey.net/
-// @version      0.9.0
+// @version      0.10.0
 // @license      MIT
 // @description       Resizable chat panel, background-persistent chats, smarter video grid layout and drag-to-swap tiles for Mul.Live.
 // @description:en    Resizable chat panel, background-persistent chats, smarter video grid layout and drag-to-swap tiles for Mul.Live.
@@ -589,6 +589,46 @@
       resizer: chatVisible ? { x: W - chatWidth, y: 0, w: resizerWidth, h: H } : null
     };
   }
+  var STACK_RATIO = 0.25;
+  var MIN_STACK_WIDTH = 160;
+  function masterStackLayout(n, W, H, gap, chatWidth, resizerWidth, chatVisible) {
+    if (n < 2) return null;
+    const availW = W - (chatVisible ? chatWidth : 0);
+    const slaves = n - 1;
+    if (availW <= 0 || H <= 0) return null;
+    const maxByHeight = Math.floor((H - gap * (slaves - 1)) / slaves * ASPECT);
+    let stackW = Math.min(Math.floor(availW * STACK_RATIO), maxByHeight);
+    if (stackW < MIN_STACK_WIDTH) stackW = Math.min(MIN_STACK_WIDTH, maxByHeight);
+    if (stackW <= 0) return null;
+    const slaveH = Math.floor(stackW / ASPECT);
+    let masterW = availW - stackW - gap;
+    let masterH = Math.floor(masterW / ASPECT);
+    if (masterH > H) {
+      masterH = H;
+      masterW = Math.floor(masterH * ASPECT);
+    }
+    if (masterW <= 0 || masterH <= 0 || slaveH <= 0) return null;
+    const stackX = availW - stackW;
+    const stackTotal = slaves * slaveH + gap * (slaves - 1);
+    const stackY = Math.floor((H - stackTotal) / 2);
+    const videos = [
+      {
+        x: Math.max(0, Math.floor((stackX - gap - masterW) / 2)),
+        y: Math.floor((H - masterH) / 2),
+        w: masterW,
+        h: masterH
+      }
+    ];
+    for (let i = 0; i < slaves; i++) {
+      videos.push({ x: stackX, y: stackY + i * (slaveH + gap), w: stackW, h: slaveH });
+    }
+    return {
+      mode: "master",
+      videos,
+      chats: chatVisible ? [{ x: W - chatWidth, y: 0, w: chatWidth, h: H }] : [],
+      resizer: chatVisible ? { x: W - chatWidth, y: 0, w: resizerWidth, h: H } : null
+    };
+  }
 
   // src/dnd.js
   var MODIFIER_HINT = "Alt(Option)을 누른 채 끌어서 위치 교환";
@@ -836,18 +876,27 @@ html.mlpp-swap .mlpp-tile:hover { border-color: #7aa2f7 !important; }
     let committed = chats.firstUsable();
     let preview = -1;
     const activeChat = () => preview >= 0 ? preview : committed;
+    let master = -1;
+    let slotStream = (
+      /** @type {number[]} */
+      []
+    );
     const orderKey = `order:${location.pathname}`;
     let order = loadOrder(orderKey, hooks.players.length);
     const dnd = createDragSwap({
       root: chatsRoot,
-      labelOf: (slot) => hooks.chatSelect.options[order[slot]]?.textContent ?? "",
+      labelOf: (slot) => hooks.chatSelect.options[slotStream[slot]]?.textContent ?? "",
       swap: (a, b) => {
-        [order[a], order[b]] = [order[b], order[a]];
+        const ia = order.indexOf(slotStream[a]);
+        const ib = order.indexOf(slotStream[b]);
+        if (ia < 0 || ib < 0) return;
+        [order[ia], order[ib]] = [order[ib], order[ia]];
         saveOrder(orderKey, order);
       },
       schedule: () => schedule()
     });
     function resetOrder() {
+      master = -1;
       order = hooks.players.map((_, i) => i);
       saveOrder(orderKey, order);
       schedule();
@@ -880,9 +929,13 @@ html.mlpp-swap .mlpp-tile:hover { border-color: #7aa2f7 !important; }
       if (chatVisible && forceCols <= 0 && mode2 !== "side") {
         layout = columnLayout(n, W, H, gap, MIN_COLUMN_WIDTH, mode2 === "columns");
       }
+      if (!layout && master >= 0 && forceCols <= 0) {
+        layout = masterStackLayout(n, W, H, gap, cw, RESIZER_WIDTH, chatVisible);
+      }
       if (!layout) {
         layout = sideLayout(n, W, H, gap, cw, RESIZER_WIDTH, chatVisible, forceCols, forceRows);
       }
+      slotStream = layout.mode === "master" ? [master, ...order.filter((stream) => stream !== master)] : order;
       const columns = layout.mode === "columns";
       const parked = { x: W - cw, y: SELECT_HEIGHT, w: cw, h: Math.max(1, H - SELECT_HEIGHT) };
       const current = activeChat();
@@ -890,7 +943,7 @@ html.mlpp-swap .mlpp-tile:hover { border-color: #7aa2f7 !important; }
       const slots = /* @__PURE__ */ new Map();
       if (columns) {
         layout.chats.forEach((r, slot) => {
-          const stream = order[slot];
+          const stream = slotStream[slot];
           if (visible.includes(stream)) slots.set(stream, r);
         });
       } else if (visible.length > 0 && layout.chats[0]) {
@@ -899,7 +952,7 @@ html.mlpp-swap .mlpp-tile:hover { border-color: #7aa2f7 !important; }
       const states = chats.sync(visible, get("chatLimit"));
       const rules = [BASE_CSS3];
       layout.videos.forEach((r, slot) => {
-        rules.push(place(`#streams iframe:nth-child(${order[slot] + 1})`, r));
+        rules.push(place(`#streams iframe:nth-child(${slotStream[slot] + 1})`, r));
       });
       for (const [index, slot] of slots) {
         if (chats.isLoaded(index)) continue;
@@ -938,9 +991,10 @@ html.mlpp-swap .mlpp-tile:hover { border-color: #7aa2f7 !important; }
       rules.push(`#chat-toggle .open { display: ${chatVisible ? "none" : "inline"} !important; }`);
       rules.push(`#chat-toggle .close { display: ${chatVisible ? "inline" : "none"} !important; }`);
       setStyle("layout", rules.join("\n"));
+      document.documentElement.dataset.mlppLayout = `mode=${layout.mode} master=${master} chat=${current} slots=[${slotStream.join(",")}] grid=${forceCols}x${forceRows} setting=${mode2}`;
       dnd.update(layout.videos);
       const byStream = /* @__PURE__ */ new Map();
-      layout.videos.forEach((r, slot) => byStream.set(order[slot], r));
+      layout.videos.forEach((r, slot) => byStream.set(slotStream[slot], r));
       audio.update(byStream);
     }
     function schedule() {
@@ -1014,6 +1068,11 @@ html.mlpp-swap .mlpp-tile:hover { border-color: #7aa2f7 !important; }
       schedule();
     });
     bus.on((index, data) => {
+      if (data.kind === "master") {
+        master = master === index ? -1 : index;
+        schedule();
+        return;
+      }
       if (!chats.usable.includes(index)) return;
       if (data.kind === "hover") {
         if (data.on) preview = index;
@@ -1361,6 +1420,25 @@ html.mlpp-swap .mlpp-tile:hover { border-color: #7aa2f7 !important; }
         e.stopPropagation();
         e.preventDefault();
         report({ kind: "commit" });
+      },
+      true
+    );
+    window.addEventListener(
+      "mousedown",
+      (e) => {
+        if (e.button !== 1 || !parentOrigin || !inCenter(e)) return;
+        e.stopPropagation();
+        e.preventDefault();
+      },
+      true
+    );
+    window.addEventListener(
+      "auxclick",
+      (e) => {
+        if (e.button !== 1 || !parentOrigin || !inCenter(e)) return;
+        e.stopPropagation();
+        e.preventDefault();
+        report({ kind: "master" });
       },
       true
     );
