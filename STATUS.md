@@ -1,6 +1,6 @@
 # mullive-plusplus STATUS
 
-현재 버전: `v0.26.0` / GitHub: `tiamatiramisu/mullive-plusplus` / Greasy Fork: [593484](https://greasyfork.org/ko/scripts/593484)
+현재 버전: `v0.26.1` / GitHub: `tiamatiramisu/mullive-plusplus` / Greasy Fork: [593484](https://greasyfork.org/ko/scripts/593484)
 
 ## 스테이지
 
@@ -43,6 +43,18 @@ Stage 1(업스트림 분석)은 `SPEC.md`로 완료.
   현행(채팅 1개)에서도 발생하는 문제이며, Stage 3에서 채팅 iframe이 늘 때 빈도를 관측할 것.
 
 ## 검증 로그
+
+### 2026-08-31 — v0.26.1 Greasy Fork 추가 정보
+
+`description.ko.html` 을 **저장소 루트**에 둔다. Greasy Fork 는 동기화 URL 의 파일명을
+저장소 루트 기준 경로로 해석해 태그된 커밋의 git 내용을 꺼내므로 스크립트 본체와 같은 자리여야 한다.
+릴리스 에셋으로도 올려 URL 자체도 실제로 열리게 했다.
+
+동기화 URL: `https://github.com/tiamatiramisu/mullive-plusplus/releases/latest/download/description.ko.html`
+(형식은 **HTML**, 기본 추가 정보 칸 — `@name` 이 한국어라 기본이 한국어다.)
+
+내용은 조작 표 하나로 시작해 채팅 유지·분할, 솔로, 배치, 링크 공유, 관리 패널 순.
+**사진 자리 다섯 곳은 문구로 남겨 뒀다** — 깨진 이미지가 뜨지 않게 `<img>` 대신 안내 문장으로 뒀다.
 
 ### 2026-08-30 — v0.26.0 Alt를 떼고 그냥 좌클릭 드래그로
 
