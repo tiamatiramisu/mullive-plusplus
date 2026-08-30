@@ -108,6 +108,13 @@ const BASE_CSS = `
 }
 #mlpp-panel select { width: 100% !important; }
 #mlpp-panel input[type="number"] { width: 88px !important; text-align: right !important; }
+#mlpp-panel input[type="checkbox"] {
+  width: 15px !important;
+  height: 15px !important;
+  margin: 0 !important;
+  accent-color: #4c8dff !important;
+  cursor: pointer !important;
+}
 #mlpp-panel .mlpp-unit { color: #8a8f98 !important; font-size: 11px !important; }
 #mlpp-panel .mlpp-actions {
   display: flex !important;
@@ -194,7 +201,12 @@ export function createSettingsPanel(actions) {
 
     /** @type {HTMLSelectElement | HTMLInputElement} */
     let control;
-    if (field.type === 'enum') {
+    if (field.type === 'bool') {
+      const input = document.createElement('input');
+      input.type = 'checkbox';
+      control = input;
+      label.append(input);
+    } else if (field.type === 'enum') {
       const select = document.createElement('select');
       (field.options ?? []).forEach((text, i) => {
         const option = document.createElement('option');
@@ -220,13 +232,20 @@ export function createSettingsPanel(actions) {
       }
     }
 
-    control.addEventListener('input', () => {
+    function commit() {
+      if (field.type === 'bool') {
+        settings.set(field.key, /** @type {HTMLInputElement} */ (control).checked ? 1 : 0);
+        return;
+      }
       const raw = Number(control.value);
       if (!Number.isFinite(raw)) return;
       const min = field.min ?? (field.type === 'enum' ? 0 : -Infinity);
       const max = field.max ?? (field.type === 'enum' ? (field.options?.length ?? 1) - 1 : Infinity);
       settings.set(field.key, Math.min(max, Math.max(min, Math.round(raw))));
-    });
+    }
+    // 체크박스는 브라우저에 따라 change로만 오는 경우가 있어 둘 다 받는다. 같은 값이면 중복 호출은 무해하다.
+    control.addEventListener('input', commit);
+    control.addEventListener('change', commit);
 
     controls.set(field.key, control);
     row.append(label);
@@ -257,7 +276,13 @@ export function createSettingsPanel(actions) {
 
   /** 저장된 값을 컨트롤에 채운다. 다른 곳(리사이저 드래그 등)에서 바뀌어도 열 때마다 맞춘다. */
   function sync() {
-    for (const [key, control] of controls) control.value = String(settings.get(key));
+    for (const field of settings.SCHEMA) {
+      const control = controls.get(field.key);
+      if (!control) continue;
+      const value = settings.get(field.key);
+      if (field.type === 'bool') /** @type {HTMLInputElement} */ (control).checked = value !== 0;
+      else control.value = String(value);
+    }
   }
 
   function open() {

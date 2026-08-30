@@ -1,6 +1,6 @@
 # mullive-plusplus STATUS
 
-현재 버전: `v0.10.0` / GitHub: `tiamatiramisu/mullive-plusplus` / Greasy Fork: [593484](https://greasyfork.org/ko/scripts/593484)
+현재 버전: `v0.11.0` / GitHub: `tiamatiramisu/mullive-plusplus` / Greasy Fork: [593484](https://greasyfork.org/ko/scripts/593484)
 
 ## 스테이지
 
@@ -472,3 +472,15 @@ mode=master master=3 chat=0 slots=[3,0,1,2] grid=0x0 setting=side
 
 마스터 `0,136 1097x617`, 슬레이브 `1097` 열에 365×205 셋이 `137 / 342 / 547`.
 node로 미리 계산한 값과 일치.
+
+### 2026-08-30 — 마스터 전환이 채팅을 끌고 간다
+
+- `masterFollowsChat` (채팅 탭, 기본 켬) — 휠클릭으로 마스터를 바꾸면 사이드 채팅도 그 방송으로 넘어간다.
+  체크박스를 쓰려고 스키마에 `bool` 타입을 더했다. 값은 0/1로 저장한다.
+- **호버 한 번 무시** — 슬레이브를 마스터로 올리면 그 자리에 다른 화면이 들어와 커서 밑에 놓이고,
+  그 화면의 에이전트가 곧바로 호버를 보고해 채팅이 엉뚱한 곳으로 넘어갔다.
+  마스터를 바꾼 직후 700ms 안에 오는 호버 하나를 소비해서 막는다. 설정 없이 항상 동작한다.
+  한 번 쓰면 바로 만료되므로 그 뒤의 진짜 호버는 정상 동작한다.
+
+**검증** — 채팅 탭에 `마스터 전환시 채팅도 전환 = 체크됨` 표시.
+실제 휠클릭 후 진단이 `master=3 chat=3` (직전에는 `master=3 chat=0`).

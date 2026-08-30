@@ -15,7 +15,7 @@ export const LAYOUT_MODES = /** @type {const} */ (['auto', 'columns', 'side']);
  * @property {string} key
  * @property {string} name
  * @property {string} tab 설정 패널에서 묶일 탭
- * @property {'enum' | 'int'} type
+ * @property {'enum' | 'int' | 'bool'} type
  * @property {number} value 기본값
  * @property {string} [help]
  * @property {string[]} [options] enum일 때 표시 문구
@@ -46,6 +46,14 @@ export const SCHEMA = [
     help: '0이 아니면 이 열 수로 고정한다. 지정하면 열 모드는 적용되지 않고 사이드 채팅이 된다.',
   },
   { key: 'gridRows', name: '수동 격자 — 행 수', tab: '레이아웃', type: 'int', value: 0, min: 0, max: 12, help: '방송 수에 필요한 행보다 크면 빈 칸이 남는다.' },
+  {
+    key: 'masterFollowsChat',
+    name: '마스터 전환시 채팅도 전환',
+    tab: '채팅',
+    type: 'bool',
+    value: 1,
+    help: '휠클릭으로 마스터를 바꾸면 사이드 채팅도 그 방송으로 넘어간다.',
+  },
   {
     key: 'chatStagger',
     name: '채팅 생성 간격',

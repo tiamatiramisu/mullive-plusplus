@@ -20,6 +20,8 @@ const DEFAULT_CHAT_WIDTH = 350;
 const MIN_COLUMN_WIDTH = 400;
 /** 타일 사이 여백. 붙여 놓는 편이 낫다고 판단해 고정한다. */
 const TILE_GAP = 0;
+/** 마스터를 바꾼 직후, 커서 밑으로 들어온 화면의 호버를 무시하는 시간 */
+const HOVER_GRACE_MS = 700;
 
 const BASE_CSS = `
 #streams {
@@ -134,6 +136,8 @@ export function startLayout(hooks, chatsRoot, chats, audio, bus) {
 
   // 마스터 앤 스택의 마스터 방송. -1이면 평범한 격자. 새로고침하면 풀린다.
   let master = -1;
+  /** 이 시각 전에 오는 호버 한 번은 무시한다. 마스터 전환 직후의 자리바꿈 때문에 생긴다. */
+  let ignoreHoverUntil = 0;
   /** 이번 렌더에서 슬롯마다 어떤 방송이 놓였는지. 마스터 모드에서는 order와 달라진다. */
   let slotStream = /** @type {number[]} */ ([]);
 
@@ -392,14 +396,28 @@ export function startLayout(hooks, chatsRoot, chats, audio, bus) {
     if (data.kind === 'master') {
       // 마스터를 다시 누르면 해제, 다른 화면을 누르면 그쪽이 마스터가 된다.
       master = master === index ? -1 : index;
+      if (master >= 0) {
+        // 슬레이브를 마스터로 올리면 그 자리에 다른 화면이 들어와 커서 밑에 놓인다.
+        // 그때 곧바로 오는 호버 한 번은 무시해야 방금 고른 마스터의 채팅이 그대로 보인다.
+        ignoreHoverUntil = Date.now() + HOVER_GRACE_MS;
+        preview = -1;
+        if (settings.get('masterFollowsChat') && chats.usable.includes(master)) committed = master;
+      }
       schedule();
       return;
     }
     // 아래는 사이드 채팅 전환이라 채팅이 있는 방송에만 해당한다.
     if (!chats.usable.includes(index)) return;
     if (data.kind === 'hover') {
-      if (data.on) preview = index;
-      else if (preview === index) preview = -1;
+      if (data.on) {
+        if (Date.now() < ignoreHoverUntil) {
+          ignoreHoverUntil = 0; // 한 번만 무시한다
+          return;
+        }
+        preview = index;
+      } else if (preview === index) {
+        preview = -1;
+      }
       schedule();
     } else if (data.kind === 'commit') {
       // 토글이 아니다. 항상 그 방송으로 맞춘다.
