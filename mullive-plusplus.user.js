@@ -4,7 +4,7 @@
 // @name:en      Mul.Live Multiview Enhancer
 // @name:ja-JP   Mul.Live マルチビュー強化
 // @namespace    http://tampermonkey.net/
-// @version      0.21.0
+// @version      0.22.0
 // @license      MIT
 // @description       Resizable chat panel, background-persistent chats, smarter video grid layout and drag-to-swap tiles for Mul.Live.
 // @description:en    Resizable chat panel, background-persistent chats, smarter video grid layout and drag-to-swap tiles for Mul.Live.
@@ -175,13 +175,9 @@
     /** @type {const} */
     ["bottom", "right"]
   );
-  var RIGHT_CLICK_ACTIONS = (
-    /** @type {const} */
-    ["switch", "toggle"]
-  );
   var TAB_HINTS = {
     레이아웃: { label: "마스터 지정", text: "휠클릭으로 한 플레이어를 확대하세요." },
-    채팅: { label: "채팅 전환", text: "플레이어에 우클릭해서 채팅을 전환/추가하세요." },
+    채팅: { label: "채팅 전환", text: "플레이어에 우클릭하세요. Shift+우클릭이면 채팅창을 쪼개 칸을 넣고 뺍니다." },
     사운드: { label: "솔로 지정", text: "플레이어에 좌클릭해서 듣고 싶은 영상들을 지정할 수 있어요." }
   };
   var GROUP_HELP = {
@@ -223,16 +219,6 @@
       type: "bool",
       value: 1,
       help: "휠클릭으로 마스터를 바꾸면 사이드 채팅도 그 방송으로 넘어간다."
-    },
-    {
-      key: "chatRightClick",
-      name: "우클릭 시",
-      tab: "채팅",
-      type: "enum",
-      inline: true,
-      options: ["채팅 전환", "채팅 추가/제거"],
-      value: 0,
-      help: "추가/제거를 고르면 채팅창이 쪼개져 여러 방송을 같이 본다. 이미 있는 방송을 우클릭하면 도로 빠진다."
     },
     {
       key: "audioHoverPreview",
@@ -306,9 +292,6 @@
   }
   function layoutMode() {
     return LAYOUT_MODES[get("layoutMode")] ?? "auto";
-  }
-  function rightClickAction() {
-    return RIGHT_CLICK_ACTIONS[get("chatRightClick")] ?? "switch";
   }
   function stackPlacement() {
     return STACK_PLACEMENTS[get("masterStackPlacement")] ?? "bottom";
@@ -839,46 +822,55 @@
     }
     return { mode: "master", videos, ...chrome };
   }
+  var AREA_TIE = 0.02;
   function splitChatPanes(region, n, minW, minH, gap) {
     if (n <= 1) return [region];
-    return carveMain(region, n, minW, minH, gap) ?? divide(region, n, minW, minH, gap);
-  }
-  function carveMain(region, n, minW, minH, gap) {
-    for (const axis of ["side", "stack"]) {
-      const [main2, rest] = bisect(region, axis, 1, 2, gap);
-      if (main2.w < minW || main2.h < minH) continue;
-      const tiled = divide(rest, n - 1, minW, minH, gap);
-      if (tiled) return [main2, ...tiled];
+    const panes = [region];
+    while (panes.length < n) {
+      const stuck = /* @__PURE__ */ new Set();
+      let split = false;
+      while (!split) {
+        const target = biggest(panes, stuck);
+        if (target < 0) return null;
+        const halves = halve(panes[target], minW, minH, gap);
+        if (!halves) {
+          stuck.add(target);
+          continue;
+        }
+        panes[target] = halves[0];
+        panes.push(halves[1]);
+        split = true;
+      }
     }
-    return null;
+    return panes;
   }
-  function bisect(region, axis, head, n, gap) {
-    if (axis === "stack") {
-      const span2 = region.h - gap;
-      const h1 = Math.round(span2 * head / n);
+  function biggest(panes, stuck) {
+    let best = 0;
+    for (let i = 0; i < panes.length; i++) {
+      if (stuck.has(i)) continue;
+      best = Math.max(best, panes[i].w * panes[i].h);
+    }
+    if (best === 0) return -1;
+    let pick = -1;
+    for (let i = 0; i < panes.length; i++) {
+      if (!stuck.has(i) && panes[i].w * panes[i].h >= best * (1 - AREA_TIE)) pick = i;
+    }
+    return pick;
+  }
+  function halve(r, minW, minH, gap) {
+    const w1 = Math.round((r.w - gap) / 2);
+    if (r.h >= minH && w1 >= minW && r.w - gap - w1 >= minW) {
       return [
-        { x: region.x, y: region.y, w: region.w, h: h1 },
-        { x: region.x, y: region.y + h1 + gap, w: region.w, h: span2 - h1 }
+        { x: r.x, y: r.y, w: w1, h: r.h },
+        { x: r.x + w1 + gap, y: r.y, w: r.w - gap - w1, h: r.h }
       ];
     }
-    const span = region.w - gap;
-    const w1 = Math.round(span * head / n);
-    return [
-      { x: region.x, y: region.y, w: w1, h: region.h },
-      { x: region.x + w1 + gap, y: region.y, w: span - w1, h: region.h }
-    ];
-  }
-  function divide(region, n, minW, minH, gap) {
-    if (n === 1) return region.w >= minW && region.h >= minH ? [region] : null;
-    const head = Math.ceil(n / 2);
-    const tail = n - head;
-    const axes = ["side", "stack"];
-    for (const axis of axes) {
-      const [first, second] = bisect(region, axis, head, n, gap);
-      const a = divide(first, head, minW, minH, gap);
-      if (!a) continue;
-      const b = divide(second, tail, minW, minH, gap);
-      if (b) return [...a, ...b];
+    const h1 = Math.round((r.h - gap) / 2);
+    if (r.w >= minW && h1 >= minH && r.h - gap - h1 >= minH) {
+      return [
+        { x: r.x, y: r.y, w: r.w, h: h1 },
+        { x: r.x, y: r.y + h1 + gap, w: r.w, h: r.h - gap - h1 }
+      ];
     }
     return null;
   }
@@ -1151,6 +1143,8 @@ html.mlpp-swap .mlpp-tile:hover { border-color: #7aa2f7 !important; }
     }
     let master = -1;
     let ignoreHoverUntil = 0;
+    let masterChat = -1;
+    let masterChatAuto = false;
     let slotStream = (
       /** @type {number[]} */
       []
@@ -1169,15 +1163,27 @@ html.mlpp-swap .mlpp-tile:hover { border-color: #7aa2f7 !important; }
       },
       schedule: () => schedule()
     });
-    function showPane(index) {
-      if (rightClickAction() === "switch") {
-        panes = [index];
-        return;
+    function setMasterChat(index) {
+      if (get("masterFollowsChat") === 0) return;
+      if (masterChat >= 0 && masterChat !== index) {
+        panes = masterChatAuto ? panes.filter((i) => i !== masterChat) : [...panes.filter((i) => i !== masterChat), masterChat];
+        masterChat = -1;
+        masterChatAuto = false;
       }
-      const next = [index, ...panes.filter((i) => i !== index)];
-      panes = paneRoom(next.length) ? next : next.slice(0, Math.max(1, panes.length));
+      if (index < 0 || !chats.usable.includes(index)) return;
+      masterChatAuto = !panes.includes(index);
+      panes = [index, ...panes.filter((i) => i !== index)];
+      masterChat = index;
+      chatVisible = true;
+    }
+    function switchPane(index) {
+      chatVisible = true;
+      if (panes.includes(index)) return;
+      if (panes[panes.length - 1] === masterChat) masterChat = -1;
+      panes = panes.length === 0 ? [index] : [...panes.slice(0, -1), index];
     }
     function togglePane(index) {
+      if (index === masterChat) masterChatAuto = false;
       if (!chatVisible) {
         chatVisible = true;
         if (!panes.includes(index)) panes.push(index);
@@ -1189,6 +1195,7 @@ html.mlpp-swap .mlpp-tile:hover { border-color: #7aa2f7 !important; }
           chatVisible = false;
           return;
         }
+        if (index === masterChat) masterChat = -1;
         panes = rest;
         return;
       }
@@ -1196,6 +1203,7 @@ html.mlpp-swap .mlpp-tile:hover { border-color: #7aa2f7 !important; }
     }
     function resetOrder() {
       master = -1;
+      setMasterChat(-1);
       audio.setMaster(-1);
       order = hooks.players.map((_, i) => i);
       saveOrder(orderKey, order);
@@ -1300,7 +1308,7 @@ html.mlpp-swap .mlpp-tile:hover { border-color: #7aa2f7 !important; }
       rules.push(`#chat-toggle .open { display: ${chatVisible ? "none" : "inline"} !important; }`);
       rules.push(`#chat-toggle .close { display: ${chatVisible ? "inline" : "none"} !important; }`);
       setStyle("layout", rules.join("\n"));
-      document.documentElement.dataset.mlppLayout = `mode=${layout.mode} master=${master} chat=${visible.join("+") || -1} panes=[${panes.join(",")}] rc=${rightClickAction()} slots=[${slotStream.join(",")}] grid=${forceCols}x${forceRows} setting=${mode2} stack=${stackPlacement()}`;
+      document.documentElement.dataset.mlppLayout = `mode=${layout.mode} master=${master} chat=${visible.join("+") || -1} panes=[${panes.join(",")}] mchat=${masterChat}${masterChatAuto ? "(auto)" : ""} slots=[${slotStream.join(",")}] grid=${forceCols}x${forceRows} setting=${mode2} stack=${stackPlacement()}`;
       dnd.update(layout.videos);
       const byStream = /* @__PURE__ */ new Map();
       layout.videos.forEach((r, slot) => byStream.set(slotStream[slot], r));
@@ -1382,8 +1390,8 @@ html.mlpp-swap .mlpp-tile:hover { border-color: #7aa2f7 !important; }
         if (master >= 0) {
           ignoreHoverUntil = Date.now() + HOVER_GRACE_MS;
           preview = -1;
-          if (get("masterFollowsChat") && chats.usable.includes(master)) showPane(master);
         }
+        setMasterChat(master);
         audio.setMaster(master);
         schedule();
         return;
@@ -1402,12 +1410,8 @@ html.mlpp-swap .mlpp-tile:hover { border-color: #7aa2f7 !important; }
         schedule();
       } else if (data.kind === "commit") {
         preview = -1;
-        if (rightClickAction() === "switch") {
-          panes = [index];
-          chatVisible = true;
-        } else {
-          togglePane(index);
-        }
+        if (data.shift) togglePane(index);
+        else switchPane(index);
         schedule();
       }
     });
@@ -1932,7 +1936,7 @@ html.mlpp-swap .mlpp-tile:hover { border-color: #7aa2f7 !important; }
         if (!parentOrigin || !inCenter(e)) return;
         e.stopPropagation();
         e.preventDefault();
-        report({ kind: "commit" });
+        report({ kind: "commit", shift: e.shiftKey });
       },
       true
     );
