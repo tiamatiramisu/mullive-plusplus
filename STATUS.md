@@ -1,6 +1,6 @@
 # mullive-plusplus STATUS
 
-현재 버전: `v0.15.0` / GitHub: `tiamatiramisu/mullive-plusplus` / Greasy Fork: [593484](https://greasyfork.org/ko/scripts/593484)
+현재 버전: `v0.16.0` / GitHub: `tiamatiramisu/mullive-plusplus` / Greasy Fork: [593484](https://greasyfork.org/ko/scripts/593484)
 
 ## 스테이지
 
@@ -571,3 +571,17 @@ Web Animations 가 올린 opacity 가 계속 0으로 눌려 영영 보이지 않
 
 **검증** — `.mlpp-ripple` 에 시험 애니메이션을 걸어 computed opacity 가 1까지 오르는 것을 확인.
 솔로 상태에서 `mlpp-audio-3` 만 `block`, 음소거된 0·1·2 는 `none`.
+
+### 2026-08-30 — 파동을 선으로, 고정 하이라이트 제거
+
+**선으로** — `box-shadow` 의 spread 는 면을 채우기 때문에 "사각형이 커지는" 모양이 된다.
+`outline` + `outline-offset` 으로 바꿨다. outline 은 두께가 그대로인 선이라
+offset 만 키우면 선 하나가 그대로 밖으로 이동한다. 레이아웃에도 영향을 주지 않는다.
+
+**고정 하이라이트 제거** — `.mlpp-audio` 의 바탕 `box-shadow` 를 없앴다. 단서는 지나가는 선뿐이다.
+
+**불투명도** — 최대 0.6 으로 낮췄다.
+
+**검증** — `.mlpp-audio` 의 `box-shadow` 가 `none`,
+파동 키프레임을 걸었을 때 `outline-offset` 이 0 → 15px(1200ms 중 500ms 지점, linear)로 움직이고
+opacity 가 0.358 로 내려가는 것을 확인.
