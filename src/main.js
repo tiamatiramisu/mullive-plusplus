@@ -1,10 +1,11 @@
-/* global GM_info, GM_registerMenuCommand */
+/* global GM_info */
 import { waitForHooks, readChatOptions, log, warn } from './dom.js';
 import { getStyleMode } from './style.js';
 import * as settings from './settings.js';
 import { createChatManager } from './chats.js';
 import { createAudioMixer } from './audio.js';
 import { startLayout } from './layout.js';
+import { createSettingsPanel } from './panel.js';
 import { startPlayerAgent } from './player-agent.js';
 import { watchPlayers, isPlayerReady, onPlayerReady, timedOut } from './ready.js';
 
@@ -38,8 +39,6 @@ async function main() {
     return;
   }
 
-  settings.init();
-
   const options = readChatOptions(hooks.chatSelect);
   /**
    * SOOP 채팅은 자기 플레이어가 방송 정보를 갖춘 뒤에야 방에 입장할 수 있다.
@@ -71,10 +70,10 @@ async function main() {
     layout.schedule();
   });
 
-  if (typeof GM_registerMenuCommand === 'function') {
-    GM_registerMenuCommand('영상 순서 초기화', () => layout.resetOrder());
-    GM_registerMenuCommand('솔로/음소거 해제', () => audio.reset());
-  }
+  createSettingsPanel([
+    { label: '영상 순서 초기화', run: () => layout.resetOrder() },
+    { label: '솔로/음소거 해제', run: () => audio.reset() },
+  ]);
 
   log(`v${VERSION} booted`, {
     swap: layout.swapHint,

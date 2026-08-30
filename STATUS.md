@@ -1,6 +1,6 @@
 # mullive-plusplus STATUS
 
-현재 버전: `v0.6.0` / GitHub: `tiamatiramisu/mullive-plusplus` / Greasy Fork: [593484](https://greasyfork.org/ko/scripts/593484)
+현재 버전: `v0.7.0` / GitHub: `tiamatiramisu/mullive-plusplus` / Greasy Fork: [593484](https://greasyfork.org/ko/scripts/593484)
 
 ## 스테이지
 
@@ -376,3 +376,34 @@ DOM을 건드리지 않으므로 재생이 끊기지 않는다. 열 모드에서
 `agents=[0,1,2]` 세 프레임 모두 핸드셰이크 성공. 가운데 클릭 → `pinned=[0] muted=[1,2]`,
 해당 타일 파랑·나머지 빨강으로 표시되고 다른 두 플레이어가 실제로 음소거됐다.
 페인트 순서 `mlpp-glow → streams → chat-container → mlpp-chats → chat-toggle` 확인.
+
+### 2026-08-30 — 설정 UI를 직접 만듦
+
+GM_config는 유저스크립트 매니저 메뉴에 얹히는 구조라 Violentmonkey 팝업이 바뀐 값을
+**새로고침 전까지 보여주지 않는다**(실제 값은 바뀌어 있는데도).
+그래서 값을 되돌려도 안 먹은 것처럼 보였고, 실제로 "3열 모드가 안 된다"고 본 것도
+`gridCols` 를 0으로 되돌린 것이 UI에 안 보였을 뿐 저장은 되어 있던 상황이었다.
+새 빌드가 저장된 진짜 값을 읽으면서 열 모드가 그대로 돌아왔다.
+
+- `src/panel.js` 추가 — 오른쪽 위 톱니 버튼(#chat-toggle 왼쪽) + 패널.
+  `settings.SCHEMA` 를 그대로 그리므로 설정을 추가하면 UI가 따라온다.
+- `src/settings.js` 에서 GM_config 의존 제거. 스키마 + GM 저장소만 남았다.
+- `meta.js` 에서 `@require`(GM_config)와 `GM_deleteValue` / `GM_registerMenuCommand` /
+  `GM_unregisterMenuCommand` / `GM_addValueChangeListener` grant 제거. `#md5` 관리도 사라졌다.
+- 메뉴 명령이던 "영상 순서 초기화" / "솔로·음소거 해제" 는 패널 버튼으로 옮겼고 "설정 초기화" 를 더했다.
+
+**고친 버그** — 단위가 없는 숫자 항목에서 입력칸이 라벨 왼쪽에 붙었다.
+`insertBefore(control, label.lastChild)` 가 단위 없을 때 이름 앞에 끼워넣은 탓.
+
+**검증** (1920×889, SOOP 3분할, 열 모드)
+
+| 항목 | 결과 |
+|---|---|
+| 톱니 버튼 | `1858,0 28x28`, `#chat-toggle`(1892,0)과 겹치지 않음 |
+| 패널 | 항목 8개 + 액션 3개, 순서 `이름 \| 입력 \| 단위` |
+| 즉시 반영 | 타일 간격 0 → 16 → 0 이 새로고침 없이 적용(640×360 ↔ 629×353) |
+| 열 모드 | 영상 `0,0` `640,0` `1280,0` 각 640×360, 채팅 3개 |
+
+## 남은 일
+
+- 수동 격자를 별도 레이아웃 모드로 분리 (지금은 `gridCols > 0` 이면 열 모드가 조용히 꺼진다)
