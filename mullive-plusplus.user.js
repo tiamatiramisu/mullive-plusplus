@@ -4,7 +4,7 @@
 // @name:en      Mul.Live Multiview Enhancer
 // @name:ja-JP   Mul.Live マルチビュー強化
 // @namespace    http://tampermonkey.net/
-// @version      0.16.2
+// @version      0.17.0
 // @license      MIT
 // @description       Resizable chat panel, background-persistent chats, smarter video grid layout and drag-to-swap tiles for Mul.Live.
 // @description:en    Resizable chat panel, background-persistent chats, smarter video grid layout and drag-to-swap tiles for Mul.Live.
@@ -201,12 +201,20 @@
       help: "휠클릭으로 마스터를 바꾸면 사이드 채팅도 그 방송으로 넘어간다."
     },
     {
+      key: "masterFollowsAudio",
+      name: "마스터 전환시 사운드도 전환",
+      tab: "사운드",
+      type: "bool",
+      value: 1,
+      help: "마스터가 되면 솔로에 들어간다. 마스터를 풀면 원래 솔로였던 것만 남는다."
+    },
+    {
       key: "glowPulse",
       name: "하이라이트 일렁임",
       tab: "사운드",
       type: "bool",
       value: 1,
-      help: "솔로 하이라이트가 파형처럼 천천히 일렁인다. CSS 애니메이션이라 비용이 없다."
+      help: "들리는 화면의 테두리가 소리에 맞춰 밝아졌다 사라진다. 끄면 아무 표시도 하지 않는다."
     },
     {
       key: "glowFromAudio",
@@ -450,6 +458,7 @@
     const sent = /* @__PURE__ */ new Map();
     const agents = /* @__PURE__ */ new Set();
     let shown = [];
+    let masterAutoPinned = -1;
     let pulseTimer = 0;
     function active() {
       const set2 = new Set(pinned);
@@ -547,6 +556,7 @@
         case "toggle":
           if (pinned.has(index)) pinned.delete(index);
           else pinned.add(index);
+          if (masterAutoPinned === index) masterAutoPinned = -1;
           apply();
           break;
       }
@@ -567,10 +577,31 @@
         rects = next;
         apply();
       },
+      /**
+       * 마스터가 바뀌면 솔로도 따라간다.
+       * 마스터가 된 방송은 솔로에 들어가고, 풀 때는 원래 솔로였던 것만 남는다.
+       * @param {number} index -1이면 마스터 해제
+       */
+      setMaster(index) {
+        if (get("masterFollowsAudio") === 0) return;
+        if (masterAutoPinned >= 0 && masterAutoPinned !== index) {
+          pinned.delete(masterAutoPinned);
+          masterAutoPinned = -1;
+        }
+        if (index >= 0) {
+          if (pinned.has(index)) masterAutoPinned = -1;
+          else {
+            pinned.add(index);
+            masterAutoPinned = index;
+          }
+        }
+        apply();
+      },
       /** 전부 들리는 상태로 되돌린다. */
       reset() {
         pinned.clear();
         hovered = -1;
+        masterAutoPinned = -1;
         apply();
       }
     };
@@ -991,6 +1022,7 @@ html.mlpp-swap .mlpp-tile:hover { border-color: #7aa2f7 !important; }
     });
     function resetOrder() {
       master = -1;
+      audio.setMaster(-1);
       order = hooks.players.map((_, i) => i);
       saveOrder(orderKey, order);
       schedule();
@@ -1169,6 +1201,7 @@ html.mlpp-swap .mlpp-tile:hover { border-color: #7aa2f7 !important; }
           preview = -1;
           if (get("masterFollowsChat") && chats.usable.includes(master)) committed = master;
         }
+        audio.setMaster(master);
         schedule();
         return;
       }
