@@ -1,6 +1,6 @@
 # mullive-plusplus STATUS
 
-현재 버전: `v0.18.0` / GitHub: `tiamatiramisu/mullive-plusplus` / Greasy Fork: [593484](https://greasyfork.org/ko/scripts/593484)
+현재 버전: `v0.19.0` / GitHub: `tiamatiramisu/mullive-plusplus` / Greasy Fork: [593484](https://greasyfork.org/ko/scripts/593484)
 
 ## 스테이지
 
@@ -43,6 +43,30 @@ Stage 1(업스트림 분석)은 `SPEC.md`로 완료.
   현행(채팅 1개)에서도 발생하는 문제이며, Stage 3에서 채팅 iframe이 늘 때 빈도를 관측할 것.
 
 ## 검증 로그
+
+### 2026-08-30 — v0.19.0 호버 미리보기 토글 + 사운드 탭 정리
+
+**호버 토글** — 채팅·사운드 탭 맨 위에 "호버로 미리 확인"을 각각 넣었다(기본 켬).
+게이트는 값을 읽는 지점 한 곳씩이다. 채팅은 `activeChat()` 에서
+`preview >= 0 && chatHoverPreview !== 0` 일 때만 미리보기를 쓰고, 사운드는 `active()` 에서
+`hovered` 를 솔로 집합에 넣을지 결정한다. 끄는 순간 `settings.onChange` 가
+`schedule()`/`apply()` 를 부르므로 마우스를 움직이지 않아도 즉시 되돌아간다.
+패널 실측: 두 탭 모두 안내문 바로 아래 첫 줄에 `ON` 으로 렌더.
+
+**하위 설정 들여쓰기** — 스키마에 `indent: true` 를 두면 `.mlpp-sub` 로 12px 들여쓰고
+왼쪽에 세로줄을 긋는다. `실제 소리에 반응` 이 `선택된 영상 시각화` 아래로 붙었다.
+
+**`glowFromAudio` 기본 켬 — 비용 실측.** 페이지에서 실제 그래프를 만들어 측정했다.
+`fftSize` 256 + 256칸 피크 루프 20000회 → **1회 0.0015ms**.
+4방송 60fps 환산 **코어 1개의 0.037%**. 같은 시점 부모 탭 프레임 간격 중앙값 16.6ms / p95 17.0ms.
+교차 출처 프레임은 렌더러 프로세스가 따로라 부모 탭에는 영향이 잡히지도 않는다.
+
+**멈춘 `AudioContext` 가드.** 기본을 켜면서 생긴 진짜 위험은 CPU가 아니라 무음이다.
+`createMediaElementSource` 는 오디오를 그래프로 돌려버리고 **되돌릴 수 없어서**,
+자동재생 정책으로 컨텍스트가 `suspended` 로 만들어지면 그 방송은 통째로 소리가 사라진다.
+에이전트가 `pointerdown`·`keydown` 마다 `resume()` 하고 `statechange` 로 상태를 보고하도록 했다.
+`analysers` 집계도 "만들어졌다"에서 **"`state === 'running'` 이다"**로 바꿔 진단에서 구분된다.
+실측 `analysers=[2,0,1,3]` — 4개 전부 running.
 
 ### 2026-08-29 — Stage 0
 

@@ -22,11 +22,12 @@ export const LAYOUT_MODES = /** @type {const} */ (['auto', 'columns', 'side']);
  * @property {number} [min]
  * @property {number} [max]
  * @property {string} [unit]
+ * @property {boolean} [indent] 바로 위 항목에 딸린 하위 설정으로 들여쓴다
  */
 
 /**
- * 탭마다 맨 위에 놓는 한 줄 안내.
- * 호버 동작은 일부러 적지 않는다 — 쓰다 보면 저절로 알게 되는 것이라 설명이 오히려 방해가 된다.
+ * 탭마다 맨 위에 놓는 한 줄 안내. 클릭 조작만 적는다.
+ * 호버 동작은 바로 아래 "호버로 미리 확인" 토글이 대신 알려준다.
  * @type {Record<string, string>}
  */
 export const TAB_HINTS = {
@@ -58,12 +59,28 @@ export const SCHEMA = [
   },
   { key: 'gridRows', name: '수동 격자 — 행 수', tab: '레이아웃', type: 'int', value: 0, min: 0, max: 12, help: '방송 수에 필요한 행보다 크면 빈 칸이 남는다.' },
   {
+    key: 'chatHoverPreview',
+    name: '호버로 미리 확인',
+    tab: '채팅',
+    type: 'bool',
+    value: 1,
+    help: '영상에 마우스를 올리면 사이드 채팅이 그 방송으로 잠깐 바뀐다. 떼면 원래대로 돌아온다.',
+  },
+  {
     key: 'masterFollowsChat',
     name: '마스터 전환시 채팅도 전환',
     tab: '채팅',
     type: 'bool',
     value: 1,
     help: '휠클릭으로 마스터를 바꾸면 사이드 채팅도 그 방송으로 넘어간다.',
+  },
+  {
+    key: 'audioHoverPreview',
+    name: '호버로 미리 확인',
+    tab: '사운드',
+    type: 'bool',
+    value: 1,
+    help: '영상에 마우스를 올리면 그 방송이 잠깐 들린다. 떼면 원래 솔로 조합으로 돌아온다.',
   },
   {
     key: 'masterFollowsAudio',
@@ -75,19 +92,20 @@ export const SCHEMA = [
   },
   {
     key: 'glowPulse',
-    name: '하이라이트 일렁임',
+    name: '선택된 영상 시각화',
     tab: '사운드',
     type: 'bool',
     value: 1,
-    help: '들리는 화면의 테두리가 소리에 맞춰 밝아졌다 사라진다. 끄면 아무 표시도 하지 않는다.',
+    help: '현재 듣고 있는 영상 테두리에 깜빡이는 테두리를 보여줍니다.',
   },
   {
     key: 'glowFromAudio',
     name: '실제 소리에 반응',
     tab: '사운드',
     type: 'bool',
-    value: 0,
-    help: '일렁임을 실제 소리 크기에 맞춘다. 플레이어 오디오를 Web Audio 그래프로 통과시키므로, 소리가 이상하면 끄고 새로고침한다.',
+    value: 1,
+    indent: true,
+    help: '깜빡임이 실제 소리를 반영합니다. 렉이 걸린다면 비활성화 해주세요.',
   },
   {
     key: 'chatStagger',

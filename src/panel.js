@@ -91,6 +91,12 @@ const BASE_CSS = `
   line-height: 1.5 !important;
 }
 #mlpp-panel .mlpp-row { margin-bottom: 12px !important; }
+/* 바로 위 항목에 딸린 하위 설정. 세로줄로 소속을 보인다. */
+#mlpp-panel .mlpp-row.mlpp-sub {
+  margin-top: -4px !important;
+  padding-left: 12px !important;
+  border-left: 2px solid #2c2d31 !important;
+}
 #mlpp-panel .mlpp-label {
   display: flex !important;
   align-items: center !important;
@@ -206,7 +212,7 @@ export function createSettingsPanel(actions) {
 
   for (const field of settings.SCHEMA) {
     const row = document.createElement('div');
-    row.className = 'mlpp-row';
+    row.className = field.indent ? 'mlpp-row mlpp-sub' : 'mlpp-row';
 
     const label = document.createElement('div');
     label.className = 'mlpp-label';

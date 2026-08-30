@@ -57,6 +57,7 @@ function inCenter(e) {
  * 반드시 destination 까지 이어야 소리가 계속 난다. 되돌릴 수 없어 기본값은 꺼짐이다.
  */
 let analyser = /** @type {AnalyserNode | null} */ (null);
+let ctx = /** @type {AudioContext | null} */ (null);
 let buffer = /** @type {Uint8Array<ArrayBuffer> | null} */ (null);
 let analysing = false;
 let lastSent = 0;
@@ -110,11 +111,17 @@ function measure() {
   }
 }
 
+/** 이미 돌고 있으면 무해한 no-op이라 조작마다 불러도 된다. */
+function wake() {
+  ctx?.resume().catch(() => {});
+}
+
 function startAnalyser() {
   analysing = true;
   if (analyser) {
     requestAnimationFrame(measure);
-    report({ kind: 'analyser', ok: true });
+    wake();
+    report({ kind: 'analyser', ok: ctx?.state === 'running' });
     return;
   }
   // 재생이 시작되기 전에는 video 가 없거나 크기가 0이다. 시작될 때 한 번 더 시도한다.
@@ -126,7 +133,7 @@ function startAnalyser() {
     return;
   }
   try {
-    const ctx = new AudioContext();
+    ctx = new AudioContext();
     const source = ctx.createMediaElementSource(video);
     analyser = ctx.createAnalyser();
     analyser.fftSize = 256;
@@ -134,8 +141,14 @@ function startAnalyser() {
     // destination 까지 잇지 않으면 소리가 끊긴다.
     analyser.connect(ctx.destination);
     buffer = new Uint8Array(analyser.fftSize);
-    ctx.resume();
-    report({ kind: 'analyser', ok: true });
+    // 멈춘 컨텍스트는 소리를 통째로 삼킨다. createMediaElementSource 는 되돌릴 수 없으니
+    // 깨어날 때까지 사용자 조작마다 다시 시도하고, 상태가 바뀌면 부모에 알린다.
+    ctx.addEventListener('statechange', () => report({ kind: 'analyser', ok: ctx?.state === 'running' }));
+    for (const type of ['pointerdown', 'keydown']) {
+      window.addEventListener(type, wake, { capture: true });
+    }
+    wake();
+    report({ kind: 'analyser', ok: ctx.state === 'running' });
   } catch {
     // 이미 다른 곳에서 소스를 잡았거나 만들 수 없는 상태다.
     // 부모는 주기 파동으로 계속 표시하므로 여기서 포기해도 하이라이트는 남는다.

@@ -136,7 +136,8 @@ export function startLayout(hooks, chatsRoot, chats, audio, bus) {
   // 호버로 잠깐 넘겨보다가 마우스를 떼면 원래 보던 채팅으로 돌아와야 한다.
   let committed = chats.firstUsable();
   let preview = -1;
-  const activeChat = () => (preview >= 0 ? preview : committed);
+  // 설정을 끄면 즉시 확정값으로 돌아간다. preview 는 그대로 둬도 참조되지 않는다.
+  const activeChat = () => (preview >= 0 && settings.get('chatHoverPreview') !== 0 ? preview : committed);
 
   // 마스터 앤 스택의 마스터 방송. -1이면 평범한 격자. 새로고침하면 풀린다.
   let master = -1;

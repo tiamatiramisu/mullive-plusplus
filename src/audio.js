@@ -101,7 +101,8 @@ export function createAudioMixer({ players, root, bus }) {
   /** 지금 들려야 하는 스트림 집합. 비어 있으면 "전부 들림"이다. */
   function active() {
     const set = new Set(pinned);
-    if (hovered >= 0) set.add(hovered);
+    // 설정을 끄면 호버는 소리에 관여하지 않는다. 고정된 조합만 남는다.
+    if (hovered >= 0 && settings.get('audioHoverPreview') !== 0) set.add(hovered);
     return set;
   }
 
