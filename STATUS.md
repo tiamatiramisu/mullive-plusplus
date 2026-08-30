@@ -1,6 +1,6 @@
 # mullive-plusplus STATUS
 
-현재 버전: `v0.16.0` / GitHub: `tiamatiramisu/mullive-plusplus` / Greasy Fork: [593484](https://greasyfork.org/ko/scripts/593484)
+현재 버전: `v0.16.1` / GitHub: `tiamatiramisu/mullive-plusplus` / Greasy Fork: [593484](https://greasyfork.org/ko/scripts/593484)
 
 ## 스테이지
 
@@ -585,3 +585,8 @@ offset 만 키우면 선 하나가 그대로 밖으로 이동한다. 레이아�
 **검증** — `.mlpp-audio` 의 `box-shadow` 가 `none`,
 파동 키프레임을 걸었을 때 `outline-offset` 이 0 → 15px(1200ms 중 500ms 지점, linear)로 움직이고
 opacity 가 0.358 로 내려가는 것을 확인.
+
+### 2026-08-30 — 파동 속도·거리 조정
+
+이동 거리 38px → 15px(2/5), 지속 900ms → 1300ms.
+겉보기 속도는 원래의 약 27%가 된다.

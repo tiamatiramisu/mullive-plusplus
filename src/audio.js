@@ -20,7 +20,9 @@ const SOLO_COLOR = 'rgb(96, 155, 255)';
 /** 파동이 가장 진할 때의 불투명도 */
 const RIPPLE_OPACITY = 0.6;
 /** 선이 타일 밖으로 이만큼 이동한다 */
-const RIPPLE_TRAVEL = 38;
+const RIPPLE_TRAVEL = 15;
+/** 한 발이 사라지기까지 걸리는 시간 */
+const RIPPLE_DURATION_MS = 1300;
 /** 실제 소리를 안 쓸 때 파동을 쏘는 주기 */
 const PULSE_PERIOD_MS = 1500;
 /** 타일마다 조금씩 어긋나게 쏴서 한 덩어리로 튀지 않게 한다. */
@@ -129,7 +131,7 @@ export function createAudioMixer({ players, root, bus }) {
         { outlineOffset: `${Math.round(travel * 0.5)}px`, opacity: RIPPLE_OPACITY * 0.7, offset: 0.5 },
         { outlineOffset: `${travel}px`, opacity: 0, offset: 1 },
       ],
-      { duration: 900, easing: 'cubic-bezier(0.15, 0.7, 0.3, 1)' },
+      { duration: RIPPLE_DURATION_MS, easing: 'cubic-bezier(0.15, 0.7, 0.3, 1)' },
     );
   }
 
