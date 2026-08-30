@@ -4,7 +4,7 @@
 // @name:en      Mul.Live Multiview Enhancer
 // @name:ja-JP   Mul.Live マルチビュー強化
 // @namespace    http://tampermonkey.net/
-// @version      0.10.0
+// @version      0.11.0
 // @license      MIT
 // @description       Resizable chat panel, background-persistent chats, smarter video grid layout and drag-to-swap tiles for Mul.Live.
 // @description:en    Resizable chat panel, background-persistent chats, smarter video grid layout and drag-to-swap tiles for Mul.Live.
@@ -192,6 +192,14 @@
       help: "0이 아니면 이 열 수로 고정한다. 지정하면 열 모드는 적용되지 않고 사이드 채팅이 된다."
     },
     { key: "gridRows", name: "수동 격자 — 행 수", tab: "레이아웃", type: "int", value: 0, min: 0, max: 12, help: "방송 수에 필요한 행보다 크면 빈 칸이 남는다." },
+    {
+      key: "masterFollowsChat",
+      name: "마스터 전환시 채팅도 전환",
+      tab: "채팅",
+      type: "bool",
+      value: 1,
+      help: "휠클릭으로 마스터를 바꾸면 사이드 채팅도 그 방송으로 넘어간다."
+    },
     {
       key: "chatStagger",
       name: "채팅 생성 간격",
@@ -787,6 +795,7 @@ html.mlpp-swap .mlpp-tile:hover { border-color: #7aa2f7 !important; }
   var DEFAULT_CHAT_WIDTH = 350;
   var MIN_COLUMN_WIDTH = 400;
   var TILE_GAP = 0;
+  var HOVER_GRACE_MS = 700;
   var BASE_CSS3 = `
 #streams {
   position: absolute !important;
@@ -877,6 +886,7 @@ html.mlpp-swap .mlpp-tile:hover { border-color: #7aa2f7 !important; }
     let preview = -1;
     const activeChat = () => preview >= 0 ? preview : committed;
     let master = -1;
+    let ignoreHoverUntil = 0;
     let slotStream = (
       /** @type {number[]} */
       []
@@ -1070,13 +1080,25 @@ html.mlpp-swap .mlpp-tile:hover { border-color: #7aa2f7 !important; }
     bus.on((index, data) => {
       if (data.kind === "master") {
         master = master === index ? -1 : index;
+        if (master >= 0) {
+          ignoreHoverUntil = Date.now() + HOVER_GRACE_MS;
+          preview = -1;
+          if (get("masterFollowsChat") && chats.usable.includes(master)) committed = master;
+        }
         schedule();
         return;
       }
       if (!chats.usable.includes(index)) return;
       if (data.kind === "hover") {
-        if (data.on) preview = index;
-        else if (preview === index) preview = -1;
+        if (data.on) {
+          if (Date.now() < ignoreHoverUntil) {
+            ignoreHoverUntil = 0;
+            return;
+          }
+          preview = index;
+        } else if (preview === index) {
+          preview = -1;
+        }
         schedule();
       } else if (data.kind === "commit") {
         committed = index;
@@ -1191,6 +1213,13 @@ html.mlpp-swap .mlpp-tile:hover { border-color: #7aa2f7 !important; }
 }
 #mlpp-panel select { width: 100% !important; }
 #mlpp-panel input[type="number"] { width: 88px !important; text-align: right !important; }
+#mlpp-panel input[type="checkbox"] {
+  width: 15px !important;
+  height: 15px !important;
+  margin: 0 !important;
+  accent-color: #4c8dff !important;
+  cursor: pointer !important;
+}
 #mlpp-panel .mlpp-unit { color: #8a8f98 !important; font-size: 11px !important; }
 #mlpp-panel .mlpp-actions {
   display: flex !important;
@@ -1247,6 +1276,22 @@ html.mlpp-swap .mlpp-tile:hover { border-color: #7aa2f7 !important; }
     }
     panel.append(tabBar, ...bodies.values());
     for (const field of SCHEMA) {
+      let commit2 = function() {
+        if (field.type === "bool") {
+          set(
+            field.key,
+            /** @type {HTMLInputElement} */
+            control.checked ? 1 : 0
+          );
+          return;
+        }
+        const raw = Number(control.value);
+        if (!Number.isFinite(raw)) return;
+        const min = field.min ?? (field.type === "enum" ? 0 : -Infinity);
+        const max = field.max ?? (field.type === "enum" ? (field.options?.length ?? 1) - 1 : Infinity);
+        set(field.key, Math.min(max, Math.max(min, Math.round(raw))));
+      };
+      var commit = commit2;
       const row = document.createElement("div");
       row.className = "mlpp-row";
       const label = document.createElement("div");
@@ -1256,7 +1301,12 @@ html.mlpp-swap .mlpp-tile:hover { border-color: #7aa2f7 !important; }
       name.textContent = field.name;
       label.append(name);
       let control;
-      if (field.type === "enum") {
+      if (field.type === "bool") {
+        const input = document.createElement("input");
+        input.type = "checkbox";
+        control = input;
+        label.append(input);
+      } else if (field.type === "enum") {
         const select = document.createElement("select");
         (field.options ?? []).forEach((text, i) => {
           const option = document.createElement("option");
@@ -1280,13 +1330,8 @@ html.mlpp-swap .mlpp-tile:hover { border-color: #7aa2f7 !important; }
           label.append(unit);
         }
       }
-      control.addEventListener("input", () => {
-        const raw = Number(control.value);
-        if (!Number.isFinite(raw)) return;
-        const min = field.min ?? (field.type === "enum" ? 0 : -Infinity);
-        const max = field.max ?? (field.type === "enum" ? (field.options?.length ?? 1) - 1 : Infinity);
-        set(field.key, Math.min(max, Math.max(min, Math.round(raw))));
-      });
+      control.addEventListener("input", commit2);
+      control.addEventListener("change", commit2);
       controls.set(field.key, control);
       row.append(label);
       if (field.type === "enum") row.append(control);
@@ -1310,7 +1355,13 @@ html.mlpp-swap .mlpp-tile:hover { border-color: #7aa2f7 !important; }
     }
     panel.append(bar);
     function sync() {
-      for (const [key, control] of controls) control.value = String(get(key));
+      for (const field of SCHEMA) {
+        const control = controls.get(field.key);
+        if (!control) continue;
+        const value = get(field.key);
+        if (field.type === "bool") control.checked = value !== 0;
+        else control.value = String(value);
+      }
     }
     function open() {
       sync();
