@@ -86,6 +86,11 @@ export function createAudioMixer({ players, root, bus }) {
   const agents = new Set();
   /** @type {number[]} 지금 하이라이트가 보이는 타일들 */
   let shown = [];
+  /**
+   * 마스터가 되면서 **우리가** 솔로에 넣은 방송.
+   * 마스터를 풀 때 되돌리려면 원래 솔로였는지를 기억해야 한다. -1이면 없음.
+   */
+  let masterAutoPinned = -1;
   /** @type {ReturnType<typeof setInterval> | 0} */
   let pulseTimer = 0;
 
@@ -215,6 +220,8 @@ export function createAudioMixer({ players, root, bus }) {
       case 'toggle':
         if (pinned.has(index)) pinned.delete(index);
         else pinned.add(index);
+        // 직접 건드린 순간부터는 사용자 것이다. 마스터를 풀어도 되돌리지 않는다.
+        if (masterAutoPinned === index) masterAutoPinned = -1;
         apply();
         break;
     }
@@ -237,10 +244,32 @@ export function createAudioMixer({ players, root, bus }) {
       rects = next;
       apply();
     },
+    /**
+     * 마스터가 바뀌면 솔로도 따라간다.
+     * 마스터가 된 방송은 솔로에 들어가고, 풀 때는 원래 솔로였던 것만 남는다.
+     * @param {number} index -1이면 마스터 해제
+     */
+    setMaster(index) {
+      if (settings.get('masterFollowsAudio') === 0) return;
+      // 앞선 마스터를 우리가 넣었던 것이라면 뺀다. 원래 솔로였다면 건드리지 않는다.
+      if (masterAutoPinned >= 0 && masterAutoPinned !== index) {
+        pinned.delete(masterAutoPinned);
+        masterAutoPinned = -1;
+      }
+      if (index >= 0) {
+        if (pinned.has(index)) masterAutoPinned = -1;
+        else {
+          pinned.add(index);
+          masterAutoPinned = index;
+        }
+      }
+      apply();
+    },
     /** 전부 들리는 상태로 되돌린다. */
     reset() {
       pinned.clear();
       hovered = -1;
+      masterAutoPinned = -1;
       apply();
     },
   };

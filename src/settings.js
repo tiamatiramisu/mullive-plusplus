@@ -55,12 +55,20 @@ export const SCHEMA = [
     help: '휠클릭으로 마스터를 바꾸면 사이드 채팅도 그 방송으로 넘어간다.',
   },
   {
+    key: 'masterFollowsAudio',
+    name: '마스터 전환시 사운드도 전환',
+    tab: '사운드',
+    type: 'bool',
+    value: 1,
+    help: '마스터가 되면 솔로에 들어간다. 마스터를 풀면 원래 솔로였던 것만 남는다.',
+  },
+  {
     key: 'glowPulse',
     name: '하이라이트 일렁임',
     tab: '사운드',
     type: 'bool',
     value: 1,
-    help: '솔로 하이라이트가 파형처럼 천천히 일렁인다. CSS 애니메이션이라 비용이 없다.',
+    help: '들리는 화면의 테두리가 소리에 맞춰 밝아졌다 사라진다. 끄면 아무 표시도 하지 않는다.',
   },
   {
     key: 'glowFromAudio',

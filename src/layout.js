@@ -167,6 +167,7 @@ export function startLayout(hooks, chatsRoot, chats, audio, bus) {
   /** 드래그 교환 순서를 기본으로 되돌린다. */
   function resetOrder() {
     master = -1;
+    audio.setMaster(-1);
     order = hooks.players.map((_, i) => i);
     settings.saveOrder(orderKey, order);
     schedule();
@@ -409,6 +410,7 @@ export function startLayout(hooks, chatsRoot, chats, audio, bus) {
         preview = -1;
         if (settings.get('masterFollowsChat') && chats.usable.includes(master)) committed = master;
       }
+      audio.setMaster(master);
       schedule();
       return;
     }
