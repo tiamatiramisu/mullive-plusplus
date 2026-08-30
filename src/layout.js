@@ -5,6 +5,7 @@ import * as panes from './panes.js';
 import { zoneAt, previewRect } from './dropzone.js';
 import { createDragSwap } from './dnd.js';
 import { showToast } from './toast.js';
+import * as share from './share.js';
 
 /**
  * 배치 적용과 사용자 조작.
@@ -666,6 +667,11 @@ export function startLayout(hooks, chatsRoot, chats, audio, bus) {
     rules.push(`#chat-toggle .close { display: ${chatVisible ? 'inline' : 'none'} !important; }`);
 
     setStyle('layout', rules.join('\n'));
+    // 자동 기록이면 주소창을 배치에 맞춘다. replaceState 라 히스토리에는 쌓이지 않는다.
+    if (settings.get('urlSync') === 0) {
+      const next = `#${shareHash()}`;
+      if (location.hash !== next) history.replaceState(null, '', location.pathname + location.search + next);
+    }
     // 어떤 배치가 왜 잡혔는지 밖에서 읽을 수 있게 남긴다.
     // 설정끼리 서로를 죽이는 상황(수동 격자가 열 모드를 끄는 등)을 눈으로 확인하기 어렵다.
     document.documentElement.dataset.mlppLayout =
@@ -830,11 +836,54 @@ export function startLayout(hooks, chatsRoot, chats, audio, bus) {
     schedule();
   });
 
+  /** 지금 배치를 주소에 실을 문자열 */
+  function shareHash() {
+    return share.encode({
+      mode: settings.layoutMode(),
+      cols: settings.get('gridCols'),
+      rows: settings.get('gridRows'),
+      chatWidth: chatWidth(),
+      master,
+      order,
+      tree,
+    });
+  }
+
+  /**
+   * 주소 해시에 배치가 실려 있으면 그걸로 시작한다.
+   * 방송 목록이 바뀌었거나 형식이 깨졌으면 통째로 버린다 — 어설프게 복원하느니 안 하는 게 낫다.
+   */
+  function restoreFromHash() {
+    const shared = share.decode(location.hash, hooks.players.length);
+    if (!shared) return;
+    settings.set('layoutMode', settings.LAYOUT_MODES.indexOf(shared.mode));
+    settings.set('gridCols', shared.cols);
+    settings.set('gridRows', shared.rows);
+    if (shared.chatWidth > 0) settings.set('chatWidth', shared.chatWidth);
+    order = shared.order;
+    settings.saveOrder(orderKey, order);
+    // 채팅 배치는 해시가 통째로 들고 있다. 마스터 추종을 다시 돌리면 그걸 헝클어뜨린다.
+    tree = shared.tree;
+    masterChat = -1;
+    masterChatAuto = false;
+    master = shared.master;
+    audio.setMaster(master);
+    chatVisible = true;
+  }
+
   window.addEventListener('resize', schedule);
   settings.onChange(schedule);
   // 프레임이 로드되면 자리 표시자를 걷는다.
   chats.onFrameLoad(schedule);
 
+  restoreFromHash();
   render();
-  return { schedule, render, resetOrder, swapHint: dnd.hint };
+  return {
+    schedule,
+    render,
+    resetOrder,
+    swapHint: dnd.hint,
+    /** 지금 배치까지 담은 공유용 주소 */
+    shareUrl: () => `${location.origin}${location.pathname}${location.search}#${shareHash()}`,
+  };
 }

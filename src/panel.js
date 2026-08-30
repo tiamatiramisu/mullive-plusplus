@@ -163,6 +163,19 @@ const BASE_CSS = `
   cursor: pointer !important;
 }
 #mlpp-panel .mlpp-unit { color: #8a8f98 !important; font-size: 11px !important; }
+/* 탭 안에 놓이는 버튼. 아래쪽 공용 버튼줄과 생김새를 맞춘다. */
+#mlpp-panel .mlpp-tab-actions { display: flex !important; flex-wrap: wrap !important; gap: 6px !important; }
+#mlpp-panel .mlpp-tab-actions button {
+  flex: 1 1 auto !important;
+  padding: 6px 8px !important;
+  border: 1px solid #3a3a3a !important;
+  border-radius: 4px !important;
+  background-color: #26272b !important;
+  color: #e6e6e6 !important;
+  font-size: 12px !important;
+  cursor: pointer !important;
+}
+#mlpp-panel .mlpp-tab-actions button:hover { background-color: #34363b !important; }
 #mlpp-panel .mlpp-actions {
   display: flex !important;
   flex-wrap: wrap !important;
@@ -185,7 +198,8 @@ const BASE_CSS = `
 `;
 
 /**
- * @param {{ label: string, run: () => void }[]} actions 패널 아래쪽 버튼들
+ * @param {{ label: string, run: () => void, tab?: string }[]} actions
+ *   버튼들. `tab` 이 있으면 그 탭 안에, 없으면 패널 아래쪽 공용 줄에 놓는다.
  */
 export function createSettingsPanel(actions) {
   setStyle('panel', BASE_CSS);
@@ -360,11 +374,27 @@ export function createSettingsPanel(actions) {
     slotFor(field)?.append(row);
   }
 
+  // 탭에 매인 버튼은 그 탭 맨 아래에 붙인다.
+  for (const name of tabNames) {
+    const mine = actions.filter((a) => a.tab === name);
+    if (mine.length === 0) continue;
+    const row = document.createElement('div');
+    row.className = 'mlpp-tab-actions';
+    for (const action of mine) {
+      const button = document.createElement('button');
+      button.type = 'button';
+      button.textContent = action.label;
+      button.addEventListener('click', () => action.run());
+      row.append(button);
+    }
+    bodies.get(name)?.append(row);
+  }
+
   showTab(tabNames[0]);
 
   const bar = document.createElement('div');
   bar.className = 'mlpp-actions';
-  for (const action of [...actions, { label: '설정 초기화', run: () => settings.resetAll() }]) {
+  for (const action of [...actions.filter((a) => !a.tab), { label: '설정 초기화', run: () => settings.resetAll() }]) {
     const button = document.createElement('button');
     button.type = 'button';
     button.textContent = action.label;

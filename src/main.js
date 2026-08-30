@@ -9,6 +9,8 @@ import { startLayout } from './layout.js';
 import { createSettingsPanel } from './panel.js';
 import { startPlayerAgent } from './player-agent.js';
 import { startChatAgent } from './chat-agent.js';
+import { copyText } from './share.js';
+import { showToast } from './toast.js';
 import { watchPlayers, isPlayerReady, onPlayerReady, timedOut } from './ready.js';
 
 const VERSION = typeof GM_info !== 'undefined' ? GM_info.script.version : 'dev';
@@ -78,6 +80,15 @@ async function main() {
   createSettingsPanel([
     { label: '영상 순서 초기화', run: () => layout.resetOrder() },
     { label: '솔로/음소거 해제', run: () => audio.reset() },
+    {
+      label: '레이아웃 링크 복사',
+      tab: '고급',
+      run: async () => {
+        const ok = await copyText(layout.shareUrl());
+        // 패널 톱니 근처에 띄운다. 버튼을 누른 자리라 시선이 거기 있다.
+        showToast(ok ? '링크 복사됨' : '복사 실패', window.innerWidth - 8, 44);
+      },
+    },
   ]);
 
   log(`v${VERSION} booted`, {
