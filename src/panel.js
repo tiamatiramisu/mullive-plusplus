@@ -92,6 +92,12 @@ const BASE_CSS = `
 #mlpp-panel .mlpp-tab-body { display: none !important; }
 #mlpp-panel .mlpp-tab-body.mlpp-active { display: block !important; }
 #mlpp-panel .mlpp-hint b { color: #dfe3ea !important; font-weight: 700 !important; }
+#mlpp-panel .mlpp-hint-line + .mlpp-hint-line { margin-top: 5px !important; }
+#mlpp-panel .mlpp-hint-line.mlpp-rule {
+  margin-top: 9px !important;
+  padding-top: 9px !important;
+  border-top: 1px solid rgba(255, 255, 255, 0.12) !important;
+}
 #mlpp-panel .mlpp-hint {
   margin: 0 0 14px !important;
   padding: 8px 10px !important;
@@ -227,14 +233,19 @@ export function createSettingsPanel(actions) {
 
     const body = document.createElement('div');
     body.className = 'mlpp-tab-body';
-    const hint = settings.TAB_HINTS[name];
-    if (hint) {
-      const line = document.createElement('div');
-      line.className = 'mlpp-hint';
-      const label = document.createElement('b');
-      label.textContent = `${hint.label}: `;
-      line.append(label, hint.text);
-      body.append(line);
+    const hints = settings.TAB_HINTS[name] ?? [];
+    if (hints.length > 0) {
+      const box = document.createElement('div');
+      box.className = 'mlpp-hint';
+      for (const hint of hints) {
+        const line = document.createElement('div');
+        line.className = hint.rule ? 'mlpp-hint-line mlpp-rule' : 'mlpp-hint-line';
+        const label = document.createElement('b');
+        label.textContent = `${hint.label}: `;
+        line.append(label, hint.text);
+        box.append(line);
+      }
+      body.append(box);
     }
     bodies.set(name, body);
   }

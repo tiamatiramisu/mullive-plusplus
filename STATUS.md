@@ -1,6 +1,6 @@
 # mullive-plusplus STATUS
 
-현재 버전: `v0.24.0` / GitHub: `tiamatiramisu/mullive-plusplus` / Greasy Fork: [593484](https://greasyfork.org/ko/scripts/593484)
+현재 버전: `v0.24.1` / GitHub: `tiamatiramisu/mullive-plusplus` / Greasy Fork: [593484](https://greasyfork.org/ko/scripts/593484)
 
 ## 스테이지
 
@@ -43,6 +43,12 @@ Stage 1(업스트림 분석)은 `SPEC.md`로 완료.
   현행(채팅 1개)에서도 발생하는 문제이며, Stage 3에서 채팅 iframe이 늘 때 빈도를 관측할 것.
 
 ## 검증 로그
+
+### 2026-08-30 — v0.24.1 안내문 정리
+
+탭 안내를 한 줄에서 여러 줄로 바꿨다(`TAB_HINTS` 가 배열). `rule` 이 붙은 줄 위에는 구분선을 긋는다.
+채팅 탭이 조작 셋으로 갈렸다 — 전환(우클릭), 추가/제거(Shift+우클릭), 그리고 구분선 아래 드래그&드롭.
+실측: 세 줄 모두 앞머리가 굵게 렌더되고 마지막 줄만 `border-top: 1px`.
 
 ### 2026-08-30 — v0.24.0 채팅 칸 수동 분할 · Alt 드래그 수리
 

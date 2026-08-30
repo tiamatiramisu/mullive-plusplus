@@ -30,14 +30,23 @@ export const STACK_PLACEMENTS = /** @type {const} */ (['bottom', 'right']);
  */
 
 /**
- * 탭마다 맨 위에 놓는 한 줄 안내. 클릭 조작만 적는다.
+ * 탭마다 맨 위에 놓는 안내. 클릭 조작만 적는다.
  * 호버 동작은 바로 아래 "호버로 미리 확인" 토글이 대신 알려준다.
- * @type {Record<string, { label: string, text: string }>}
+ * `rule` 이 붙은 줄 위에는 구분선을 긋는다.
+ * @type {Record<string, { label: string, text: string, rule?: boolean }[]>}
  */
 export const TAB_HINTS = {
-  레이아웃: { label: '마스터 지정', text: '휠클릭으로 한 플레이어를 확대하세요.' },
-  채팅: { label: '채팅 전환', text: '플레이어에 우클릭하세요. Shift+우클릭이면 채팅창을 쪼개 칸을 넣고 뺍니다.' },
-  사운드: { label: '솔로 지정', text: '플레이어에 좌클릭해서 듣고 싶은 영상들을 지정할 수 있어요.' },
+  레이아웃: [{ label: '마스터 지정', text: '휠클릭으로 한 플레이어를 확대하세요.' }],
+  채팅: [
+    { label: '채팅 전환', text: '플레이어에 우클릭하세요.' },
+    { label: '채팅 추가/제거', text: '플레이어에 Shift+우클릭해서 채팅창을 추가할 수 있어요.' },
+    {
+      label: '드래그&드롭',
+      text: '우클릭 드래그로도 채팅을 조작할 수 있어요. Shift+우클릭으로 채팅을 제거하세요.',
+      rule: true,
+    },
+  ],
+  사운드: [{ label: '솔로 지정', text: '플레이어에 좌클릭해서 듣고 싶은 영상들을 지정할 수 있어요.' }],
 };
 
 /**
