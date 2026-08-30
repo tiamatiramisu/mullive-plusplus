@@ -106,8 +106,9 @@ function place(selector, r, extra = '') {
  * @param {HTMLElement} chatsRoot
  * @param {ReturnType<typeof import('./chats.js').createChatManager>} chats
  * @param {ReturnType<typeof import('./audio.js').createAudioMixer>} audio
+ * @param {ReturnType<typeof import('./frames.js').createFrameBus>} bus
  */
-export function startLayout(hooks, chatsRoot, chats, audio) {
+export function startLayout(hooks, chatsRoot, chats, audio, bus) {
   // #chat-toggle 앞에 넣어야 토글 버튼이 채팅 위에 그려진다.
   hooks.chatToggle.before(chatsRoot);
   // select는 iframe이 아니라 옮겨도 리로드되지 않는다. 페이지 JS가 들고 있는 참조도 그대로 유효하다.
@@ -121,7 +122,11 @@ export function startLayout(hooks, chatsRoot, chats, audio) {
   /** @type {ReturnType<typeof setTimeout> | 0} */
   let timer = 0;
   let chatVisible = true;
-  let active = chats.firstUsable();
+  // 사이드 모드의 채팅 선택. 확정값과 호버 미리보기를 나눠 둔다.
+  // 호버로 잠깐 넘겨보다가 마우스를 떼면 원래 보던 채팅으로 돌아와야 한다.
+  let committed = chats.firstUsable();
+  let preview = -1;
+  const activeChat = () => (preview >= 0 ? preview : committed);
 
   // 슬롯(화면상의 자리) → 스트림(방송) 대응. 드래그 교환으로만 바뀐다.
   // iframe을 옮기지 않고 이 대응만 바꾸므로 교환해도 재생이 끊기지 않는다.
@@ -185,7 +190,8 @@ export function startLayout(hooks, chatsRoot, chats, audio) {
     // 안 보이는 채팅도 크기를 유지해야 뒤에서 계속 내려간다. 사이드 패널 자리를 빌려 쓴다.
     const parked = { x: W - cw, y: SELECT_HEIGHT, w: cw, h: Math.max(1, H - SELECT_HEIGHT) };
 
-    const visible = columns ? chats.usable : chatVisible && active >= 0 ? [active] : [];
+    const current = activeChat();
+    const visible = columns ? chats.usable : chatVisible && current >= 0 ? [current] : [];
 
     // 지금 화면에 자리를 가진 채팅과 그 사각형. 열 모드에서는 채팅이 자기 영상을 따라간다.
     /** @type {Map<number, import('./geometry.js').Rect>} */
@@ -240,6 +246,8 @@ export function startLayout(hooks, chatsRoot, chats, audio) {
     } else {
       const panel = layout.chats[0];
       rules.push('#chat-select { display: block !important; }');
+      // 호버 미리보기 중에도 드롭다운이 지금 보이는 채팅을 가리키게 한다.
+      if (current >= 0 && hooks.chatSelect.selectedIndex !== current) hooks.chatSelect.selectedIndex = current;
       if (panel) {
         // 리사이저가 채팅 왼쪽 끝에 겹쳐 있으므로 select를 그만큼 밀어 잡는 영역을 가리지 않게 한다.
         const left = panel.x + RESIZER_WIDTH + 2;
@@ -278,9 +286,10 @@ export function startLayout(hooks, chatsRoot, chats, audio) {
       e.stopPropagation();
       if (hooks.chatSelect.value === 'about:blank') {
         chatVisible = false;
-        if (active >= 0) hooks.chatSelect.selectedIndex = active;
+        if (committed >= 0) hooks.chatSelect.selectedIndex = committed;
       } else {
-        active = hooks.chatSelect.selectedIndex;
+        committed = hooks.chatSelect.selectedIndex;
+        preview = -1;
         chatVisible = true;
       }
       schedule();
@@ -347,6 +356,23 @@ export function startLayout(hooks, chatsRoot, chats, audio) {
   resizer.addEventListener('dblclick', () => {
     settings.set('chatWidth', DEFAULT_CHAT_WIDTH);
     schedule();
+  });
+
+  // 사이드 모드에서 영상에 호버하면 그 방송 채팅을 잠깐 보여주고, 우클릭하면 진짜로 넘어간다.
+  // 열 모드는 채팅이 전부 보이므로 해당 없다.
+  bus.on((index, data) => {
+    if (!chats.usable.includes(index)) return;
+    if (data.kind === 'hover') {
+      if (data.on) preview = index;
+      else if (preview === index) preview = -1;
+      schedule();
+    } else if (data.kind === 'commit') {
+      // 토글이 아니다. 항상 그 방송으로 맞춘다.
+      committed = index;
+      preview = -1;
+      chatVisible = true;
+      schedule();
+    }
   });
 
   window.addEventListener('resize', schedule);

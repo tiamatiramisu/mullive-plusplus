@@ -58,6 +58,29 @@ const BASE_CSS = `
   font-weight: 700 !important;
   color: #fff !important;
 }
+#mlpp-panel .mlpp-tabs {
+  display: flex !important;
+  gap: 2px !important;
+  margin: 0 0 12px !important;
+  border-bottom: 1px solid #2c2d31 !important;
+}
+#mlpp-panel .mlpp-tabs button {
+  padding: 6px 12px !important;
+  border: 0 !important;
+  border-bottom: 2px solid transparent !important;
+  border-radius: 0 !important;
+  background: transparent !important;
+  color: #8a8f98 !important;
+  font-size: 12px !important;
+  cursor: pointer !important;
+}
+#mlpp-panel .mlpp-tabs button:hover { color: #d0d0d0 !important; }
+#mlpp-panel .mlpp-tabs button.mlpp-active {
+  color: #fff !important;
+  border-bottom-color: #4c8dff !important;
+}
+#mlpp-panel .mlpp-tab-body { display: none !important; }
+#mlpp-panel .mlpp-tab-body.mlpp-active { display: block !important; }
 #mlpp-panel .mlpp-row { margin-bottom: 12px !important; }
 #mlpp-panel .mlpp-label {
   display: flex !important;
@@ -129,6 +152,35 @@ export function createSettingsPanel(actions) {
   /** @type {Map<string, HTMLSelectElement | HTMLInputElement>} */
   const controls = new Map();
 
+  // 스키마에 적힌 탭 순서 그대로 만든다. 설정을 추가하면 UI가 알아서 따라온다.
+  const tabNames = [...new Set(settings.SCHEMA.map((f) => f.tab))];
+  const tabBar = document.createElement('div');
+  tabBar.className = 'mlpp-tabs';
+  /** @type {Map<string, HTMLElement>} */
+  const bodies = new Map();
+  /** @type {Map<string, HTMLButtonElement>} */
+  const tabButtons = new Map();
+
+  /** @param {string} name */
+  function showTab(name) {
+    for (const [tab, body] of bodies) body.classList.toggle('mlpp-active', tab === name);
+    for (const [tab, button] of tabButtons) button.classList.toggle('mlpp-active', tab === name);
+  }
+
+  for (const name of tabNames) {
+    const button = document.createElement('button');
+    button.type = 'button';
+    button.textContent = name;
+    button.addEventListener('click', () => showTab(name));
+    tabBar.append(button);
+    tabButtons.set(name, button);
+
+    const body = document.createElement('div');
+    body.className = 'mlpp-tab-body';
+    bodies.set(name, body);
+  }
+  panel.append(tabBar, ...bodies.values());
+
   for (const field of settings.SCHEMA) {
     const row = document.createElement('div');
     row.className = 'mlpp-row';
@@ -187,8 +239,10 @@ export function createSettingsPanel(actions) {
       help.textContent = field.help;
       row.append(help);
     }
-    panel.append(row);
+    bodies.get(field.tab)?.append(row);
   }
+
+  showTab(tabNames[0]);
 
   const bar = document.createElement('div');
   bar.className = 'mlpp-actions';

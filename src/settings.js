@@ -14,6 +14,7 @@ export const LAYOUT_MODES = /** @type {const} */ (['auto', 'columns', 'side']);
  * @typedef {object} Field
  * @property {string} key
  * @property {string} name
+ * @property {string} tab 설정 패널에서 묶일 탭
  * @property {'enum' | 'int'} type
  * @property {number} value 기본값
  * @property {string} [help]
@@ -28,6 +29,7 @@ export const SCHEMA = [
   {
     key: 'layoutMode',
     name: '레이아웃',
+    tab: '레이아웃',
     type: 'enum',
     options: ['자동', '열 — 영상 아래 각자 채팅', '사이드 — 단일 채팅'],
     value: 0,
@@ -36,6 +38,7 @@ export const SCHEMA = [
   {
     key: 'minColumnWidth',
     name: '열 모드 최소 열 폭',
+    tab: '레이아웃',
     type: 'int',
     value: 400,
     min: 240,
@@ -43,21 +46,23 @@ export const SCHEMA = [
     unit: 'px',
     help: '열 하나의 폭이 곧 영상 폭이자 채팅 폭이다. 이보다 좁아지면 사이드로 내려간다.',
   },
-  { key: 'chatWidth', name: '사이드 채팅 폭', type: 'int', value: 350, min: 240, max: 1600, unit: 'px', help: '리사이저를 끌어도 바뀐다.' },
-  { key: 'tileGap', name: '타일 간격', type: 'int', value: 0, min: 0, max: 40, unit: 'px' },
+  { key: 'chatWidth', name: '사이드 채팅 폭', tab: '레이아웃', type: 'int', value: 350, min: 240, max: 1600, unit: 'px', help: '리사이저를 끌어도 바뀐다.' },
+  { key: 'tileGap', name: '타일 간격', tab: '레이아웃', type: 'int', value: 0, min: 0, max: 40, unit: 'px' },
   {
     key: 'gridCols',
     name: '수동 격자 — 열 수',
+    tab: '레이아웃',
     type: 'int',
     value: 0,
     min: 0,
     max: 12,
     help: '0이 아니면 이 열 수로 고정한다. 지정하면 열 모드는 적용되지 않고 사이드 채팅이 된다.',
   },
-  { key: 'gridRows', name: '수동 격자 — 행 수', type: 'int', value: 0, min: 0, max: 12, help: '방송 수에 필요한 행보다 크면 빈 칸이 남는다.' },
+  { key: 'gridRows', name: '수동 격자 — 행 수', tab: '레이아웃', type: 'int', value: 0, min: 0, max: 12, help: '방송 수에 필요한 행보다 크면 빈 칸이 남는다.' },
   {
     key: 'chatStagger',
     name: '채팅 생성 간격',
+    tab: '채팅',
     type: 'int',
     value: 800,
     min: 0,
@@ -68,6 +73,7 @@ export const SCHEMA = [
   {
     key: 'chatLimit',
     name: '동시 유지 채팅 수',
+    tab: '채팅',
     type: 'int',
     value: 0,
     min: 0,

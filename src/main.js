@@ -4,6 +4,7 @@ import { getStyleMode } from './style.js';
 import * as settings from './settings.js';
 import { createChatManager } from './chats.js';
 import { createAudioMixer } from './audio.js';
+import { createFrameBus } from './frames.js';
 import { startLayout } from './layout.js';
 import { createSettingsPanel } from './panel.js';
 import { startPlayerAgent } from './player-agent.js';
@@ -60,8 +61,9 @@ async function main() {
   const glowRoot = document.createElement('div');
   glowRoot.id = 'mlpp-glow';
   hooks.streams.before(glowRoot);
-  const audio = createAudioMixer({ players: hooks.players, root: glowRoot });
-  const layout = startLayout(hooks, chatsRoot, chats, audio);
+  const bus = createFrameBus(hooks.players);
+  const audio = createAudioMixer({ players: hooks.players, root: glowRoot, bus });
+  const layout = startLayout(hooks, chatsRoot, chats, audio, bus);
 
   // 플레이어가 준비될 때마다 다시 그리고, 그 프레임의 에이전트에 인사한다.
   onPlayerReady(() => {

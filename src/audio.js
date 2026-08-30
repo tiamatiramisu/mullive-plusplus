@@ -44,8 +44,9 @@ const BASE_CSS = `
  * @param {object} deps
  * @param {HTMLIFrameElement[]} deps.players
  * @param {HTMLElement} deps.root 오버레이를 담을 컨테이너
+ * @param {ReturnType<typeof import('./frames.js').createFrameBus>} deps.bus
  */
-export function createAudioMixer({ players, root }) {
+export function createAudioMixer({ players, root, bus }) {
   /** @type {Set<number>} 고정된 솔로 */
   const pinned = new Set();
   /** @type {number} 지금 마우스가 올라간 스트림. 없으면 -1 */
@@ -64,19 +65,6 @@ export function createAudioMixer({ players, root }) {
     const set = new Set(pinned);
     if (hovered >= 0) set.add(hovered);
     return set;
-  }
-
-  /** @param {MessageEventSource | null} source */
-  function indexOf(source) {
-    return players.findIndex((f) => f.contentWindow === source);
-  }
-
-  /** @param {number} index @param {Record<string, unknown>} data */
-  function send(index, data) {
-    const win = players[index]?.contentWindow;
-    if (!win) return;
-    win.postMessage({ mlpp: true, ...data }, 'https://play.sooplive.com');
-    win.postMessage({ mlpp: true, ...data }, 'https://play.sooplive.co.kr');
   }
 
   /** @param {number} index */
@@ -99,7 +87,7 @@ export function createAudioMixer({ players, root }) {
       const muted = soloing && !set.has(index);
       if (sent.get(index) !== muted) {
         sent.set(index, muted);
-        send(index, { kind: 'mute', muted });
+        bus.send(index, { kind: 'mute', muted });
       }
     });
 
@@ -131,17 +119,11 @@ export function createAudioMixer({ players, root }) {
         .join(',')}] agents=[${[...agents].join(',')}]`;
   }
 
-  window.addEventListener('message', (e) => {
-    if (!/^https:\/\/play\.sooplive\.(com|co\.kr)$/.test(e.origin)) return;
-    const data = /** @type {{ mlpp?: unknown, kind?: string, on?: unknown } | null} */ (e.data);
-    if (!data || data.mlpp !== true) return;
-    const index = indexOf(e.source);
-    if (index < 0) return; // 채팅 프레임 등 플레이어가 아닌 곳에서 온 것
-
+  bus.on((index, data) => {
     switch (data.kind) {
       case 'agent':
         // 에이전트가 늦게 올라온 경우. 인사하고 현재 상태를 다시 내려보낸다.
-        send(index, { kind: 'hello' });
+        bus.send(index, { kind: 'hello' });
         sent.delete(index);
         apply();
         break;
@@ -165,7 +147,7 @@ export function createAudioMixer({ players, root }) {
   return {
     /** 플레이어가 준비되면 부른다. 에이전트가 먼저 올라와 있을 수도 있어 양쪽에서 인사한다. */
     greet(/** @type {number} */ index) {
-      send(index, { kind: 'hello' });
+      bus.send(index, { kind: 'hello' });
     },
     /** @param {Map<number, import('./geometry.js').Rect>} next 스트림별 화면 위치 */
     update(next) {

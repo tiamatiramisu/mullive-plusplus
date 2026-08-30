@@ -105,6 +105,19 @@ export function startPlayerAgent() {
     true,
   );
 
+  // 우클릭은 사이드 채팅을 이 방송으로 확정한다. 가운데 영역에서만 가져가고
+  // 가장자리는 플레이어의 기본 메뉴에 넘긴다.
+  window.addEventListener(
+    'contextmenu',
+    (e) => {
+      if (!parentOrigin || !inCenter(e)) return;
+      e.stopPropagation();
+      e.preventDefault();
+      report({ kind: 'commit' });
+    },
+    true,
+  );
+
   // 부모가 우리보다 먼저 준비됐을 수도, 나중일 수도 있다. 양쪽에서 인사한다.
   window.parent.postMessage({ mlpp: true, kind: 'agent' }, '*');
 }
