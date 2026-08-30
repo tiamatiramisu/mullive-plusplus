@@ -1,6 +1,6 @@
 # mullive-plusplus STATUS
 
-현재 버전: `v0.26.1` / GitHub: `tiamatiramisu/mullive-plusplus` / Greasy Fork: [593484](https://greasyfork.org/ko/scripts/593484)
+현재 버전: `v0.26.2` / GitHub: `tiamatiramisu/mullive-plusplus` / Greasy Fork: [593484](https://greasyfork.org/ko/scripts/593484)
 
 ## 스테이지
 
@@ -43,6 +43,25 @@ Stage 1(업스트림 분석)은 `SPEC.md`로 완료.
   현행(채팅 1개)에서도 발생하는 문제이며, Stage 3에서 채팅 iframe이 늘 때 빈도를 관측할 것.
 
 ## 검증 로그
+
+### 2026-08-31 — v0.26.2 추가 정보 동기화 실패(인코딩) 수정
+
+`incompatible encoding regexp match (UTF-8 regexp with BINARY (ASCII-8BIT) string)` 로 동기화가 실패했다.
+Greasy Fork 소스를 따라가 원인을 확정했다.
+
+- `lib/public_http_fetcher.rb` — 추가 정보를 `SsrfFilter.get(...).body.to_s` 로 받는다.
+  **Net::HTTP 의 본문은 Content-Type 의 charset 과 무관하게 늘 ASCII-8BIT(BINARY)** 다.
+- `lib/script_importer/base_script_importer.rb` — 스크립트 **코드**에는
+  `code.force_encoding(Encoding::UTF_8)` 이 있는데(34행) **추가 정보 경로에는 없다**(58행).
+  그래서 `@name` 이 한글인 스크립트 본체는 멀쩡히 동기화되는데 설명만 터진다.
+
+**URL 을 raw 로 바꾸든 릴리스 에셋으로 두든 소용없다. 바이트가 문제다.**
+비 ASCII 가 한 글자라도 있으면 UTF-8 정규식과 부딪힌다.
+
+그래서 원본(`description.ko.src.html`)과 동기화본(`description.ko.html`)을 나눴다.
+`encode-description.mjs` 가 비 ASCII 를 전부 숫자 문자 참조로 바꾼다(4727자 → 17971바이트, 비 ASCII 0).
+브라우저가 되돌려 그리므로 보이는 것은 같다. **동기화 URL 은 그대로다** — 이름을 뒤집어 맞췄다.
+CI 가 다시 만들어 `git diff --exit-code` 로 대조하므로, 원본만 고치고 태그를 밀면 릴리스가 실패한다.
 
 ### 2026-08-31 — v0.26.1 Greasy Fork 추가 정보
 

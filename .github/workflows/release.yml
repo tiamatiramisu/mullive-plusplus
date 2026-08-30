@@ -19,8 +19,14 @@ jobs:
       # Greasy Fork 웹훅이 읽는 것은 릴리스 에셋이 아니라 이 커밋된 파일이다.
       - name: Verify committed artifact
         run: diff -u mullive-plusplus.user.js dist/mullive-plusplus.user.js
-      # 추가 정보(설명)도 같은 방식으로 동기화된다. Greasy Fork 는 동기화 URL 의 파일명을
-      # 저장소 루트 기준으로 해석하므로 루트에 있어야 하고, 에셋으로도 올려 URL 자체도 맞춘다.
+      # 추가 정보(설명)는 ASCII 사본이라야 한다. Greasy Fork 가 내려받은 본문에
+      # 인코딩을 지정하지 않아 한글이 들어가면 동기화가 통째로 실패한다(encode-description.mjs 주석).
+      # 원본을 고치고 다시 만들지 않은 채 태그를 밀면 여기서 걸린다.
+      - run: node encode-description.mjs
+      - name: Verify committed description
+        run: git diff --exit-code description.ko.html
+      # Greasy Fork 는 동기화 URL 의 파일명을 저장소 루트 기준으로 해석하므로 루트에 있어야 하고,
+      # 에셋으로도 올려 URL 자체도 맞춘다.
       - run: gh release create "$GITHUB_REF_NAME" mullive-plusplus.user.js description.ko.html --title "$GITHUB_REF_NAME" --generate-notes
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

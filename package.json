@@ -7,6 +7,7 @@
   "license": "MIT",
   "scripts": {
     "build": "node build.mjs",
+    "description": "node encode-description.mjs",
     "watch": "node build.mjs --watch",
     "typecheck": "tsc -p jsconfig.json --noEmit",
     "release": "node release.mjs"
