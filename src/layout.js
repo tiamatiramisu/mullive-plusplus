@@ -1,6 +1,8 @@
 import { setStyle } from './style.js';
 import * as settings from './settings.js';
-import { columnLayout, masterStackLayout, sideLayout, splitChatPanes } from './geometry.js';
+import { columnLayout, masterStackLayout, sideLayout } from './geometry.js';
+import * as panes from './panes.js';
+import { zoneAt, previewRect } from './dropzone.js';
 import { createDragSwap } from './dnd.js';
 import { showToast } from './toast.js';
 
@@ -24,6 +26,10 @@ const DEFAULT_CHAT_WIDTH = 350;
 const MIN_COLUMN_WIDTH = 400;
 /** 타일 사이 여백. 붙여 놓는 편이 낫다고 판단해 고정한다. */
 const TILE_GAP = 0;
+/** 이만큼 넘게 움직여야 클릭이 아니라 드래그로 본다 */
+const DRAG_SLOP = 6;
+/** 손을 뗀 뒤 우클릭 메뉴를 막아 두는 시간. 윈도우는 mouseup 뒤에 메뉴가 온다. */
+const MENU_GRACE_MS = 300;
 /** 마스터를 바꾼 직후, 커서 밑으로 들어온 화면의 호버를 무시하는 시간 */
 const HOVER_GRACE_MS = 700;
 
@@ -75,6 +81,23 @@ const BASE_CSS = `
 /* 페이지의 채팅 드롭다운은 감춘다. 우클릭과 설정 패널이 그 일을 대신한다.
    값은 계속 맞춰 둔다 — 드래그 라벨이 이 select 의 옵션 텍스트를 읽는다. */
 #chat-select { display: none !important; }
+/* 드롭 표시. 드래그 타일(7)보다 위에 둔다. */
+#mlpp-dropbg, #mlpp-drop {
+  position: absolute !important;
+  z-index: 8 !important;
+  display: none !important;
+  box-sizing: border-box !important;
+  pointer-events: none !important;
+}
+#mlpp-dropbg {
+  border: 2px dashed rgba(255, 255, 255, 0.3) !important;
+  background-color: rgba(0, 0, 0, 0.28) !important;
+}
+#mlpp-drop {
+  border: 2px solid #7aa2f7 !important;
+  border-radius: 4px !important;
+  background-color: rgba(122, 162, 247, 0.28) !important;
+}
 /* 잡는 영역은 세로 전체로 넓게 두되, 보이는 것은 가운데의 짧은 그립뿐이다.
    막대를 세로로 길게 그리면 영상과 채팅 사이에 경계선이 생겨 눈에 거슬린다. */
 #mlpp-resizer {
@@ -130,36 +153,77 @@ export function startLayout(hooks, chatsRoot, chats, audio, bus) {
   resizer.title = '채팅 폭 조절 (더블클릭: 기본값)';
   chatsRoot.append(resizer);
 
+  // 우클릭 드래그로 채팅 칸을 나눌 때 쓰는 표시. 전체 영역과 새 칸이 생길 자리.
+  const dropBg = document.createElement('div');
+  dropBg.id = 'mlpp-dropbg';
+  const dropBox = document.createElement('div');
+  dropBox.id = 'mlpp-drop';
+  chatsRoot.append(dropBg, dropBox);
+
   /** @type {ReturnType<typeof setTimeout> | 0} */
   let timer = 0;
   let chatVisible = true;
-  // 사이드 모드의 채팅 칸. 확정 목록과 호버 미리보기를 나눠 둔다.
-  // 호버로 잠깐 넘겨보다가 마우스를 떼면 원래 보던 채팅으로 돌아와야 한다.
-  let panes = [chats.firstUsable()].filter((i) => i >= 0);
+  /** 채팅 칸 트리. 잎 하나가 채팅 하나다. 구조는 `panes.js` 가 들고 있다. */
+  let tree = /** @type {import('./panes.js').PaneNode} */ (panes.leaf(chats.firstUsable()));
   let preview = -1;
   /** 마지막 렌더에서 채팅이 차지한 영역. 칸을 더 넣을 수 있는지 판단하는 데 쓴다. */
   let chatRegion = /** @type {import('./geometry.js').Rect | null} */ (null);
+  /** 마지막 렌더의 잎별 사각형. 드롭 자리 판정에 쓴다. */
+  let paneBoxes = /** @type {Map<number, import('./geometry.js').Rect>} */ (new Map());
 
-  /**
-   * 지금 보여야 할 채팅 목록.
-   *
-   * 호버 미리보기는 **마지막 칸만** 바꾼다. 우클릭 설정과 무관하다.
-   * 첫 칸(메인)은 건드리지 않고 칸 수도 그대로라, 잠깐 넘겨보는 동안 배치가 흔들리지 않는다.
-   */
-  function visiblePanes() {
-    const base = panes.filter((i) => chats.usable.includes(i));
-    if (preview < 0 || settings.get('chatHoverPreview') === 0 || base.includes(preview)) return base;
-    if (base.length === 0) return [preview];
-    return [...base.slice(0, -1), preview];
+  /** 가장 나중에 생긴 칸. 호버와 우클릭 전환이 노리는 자리다. */
+  function newestLeaf() {
+    return panes.leaves(tree).reduce((best, l) => (l.id > best.id ? l : best));
+  }
+
+  /** 가장 큰 칸. 마스터 채팅이 앉는 자리다. */
+  function largestLeaf() {
+    return chatRegion ? panes.largestLeaf(tree, chatRegion, TILE_GAP) : newestLeaf();
+  }
+
+  /** @param {number} stream */
+  function leafOfStream(stream) {
+    return panes.leaves(tree).find((l) => l.stream === stream) ?? null;
   }
 
   /**
-   * 칸을 n개까지 넣을 수 있는지. 영역을 아직 모르면 막지 않는다(렌더가 다시 줄인다).
-   * @param {number} n
+   * 두 칸의 방송을 맞바꾼다. 구조는 그대로 두고 내용만 옮긴다.
+   * @param {{ stream: number }} a
+   * @param {{ stream: number }} b
    */
-  function paneRoom(n) {
-    if (n <= 1) return true;
-    return !chatRegion || splitChatPanes(chatRegion, n, MIN_PANE_WIDTH, MIN_PANE_HEIGHT, TILE_GAP) !== null;
+  function swapStreams(a, b) {
+    const held = a.stream;
+    a.stream = b.stream;
+    b.stream = held;
+  }
+
+  /**
+   * 자동으로 한 칸 늘린다. 가장 큰 칸을 반으로 가른다.
+   * @param {number} stream
+   */
+  function addPane(stream) {
+    if (!chatRegion) return false;
+    const next = panes.autoSplit(tree, chatRegion, TILE_GAP, MIN_PANE_WIDTH, MIN_PANE_HEIGHT, stream);
+    if (!next) return false;
+    tree = next;
+    return true;
+  }
+
+  /**
+   * 칸 하나를 닫는다. 마지막 하나는 지우지 않고 패널을 접는다(다시 펼 때 빈 화면이 나오지 않게).
+   * @param {number} id
+   * @returns {string | null}
+   */
+  function closePane(id) {
+    const held = panes.findLeaf(tree, id);
+    if (!held) return null;
+    if (held.stream === masterChat) masterChat = -1;
+    if (panes.leaves(tree).length === 1) {
+      chatVisible = false;
+      return '➖\u{1F4AC}';
+    }
+    tree = panes.remove(tree, id);
+    return '➖\u{1F4AC}';
   }
 
   // 마스터 앤 스택의 마스터 방송. -1이면 평범한 격자. 새로고침하면 풀린다.
@@ -185,11 +249,21 @@ export function startLayout(hooks, chatsRoot, chats, audio, bus) {
     labelOf: (slot) => hooks.chatSelect.options[slotStream[slot]]?.textContent ?? '',
     swap: (a, b) => {
       // 슬롯이 아니라 방송 기준으로 맞바꾼다. 마스터 모드에서는 슬롯과 order 순서가 다르다.
-      const ia = order.indexOf(slotStream[a]);
-      const ib = order.indexOf(slotStream[b]);
+      const sa = slotStream[a];
+      const sb = slotStream[b];
+      const ia = order.indexOf(sa);
+      const ib = order.indexOf(sb);
       if (ia < 0 || ib < 0) return;
       [order[ia], order[ib]] = [order[ib], order[ia]];
       settings.saveOrder(orderKey, order);
+      // 마스터 모드에서 첫 자리만은 order가 아니라 master가 정한다.
+      // 그 자리와 맞바꿀 때 master를 안 바꾸면 첫 칸은 그대로고 나머지만 흔들린다.
+      // 둘을 같이 해야 두 타일이 실제로 자리를 맞바꾼다.
+      if (master >= 0 && (a === 0 || b === 0)) {
+        master = a === 0 ? sb : sa;
+        setMasterChat(master);
+        audio.setMaster(master);
+      }
     },
     schedule: () => schedule(),
   });
@@ -209,18 +283,41 @@ export function startLayout(hooks, chatsRoot, chats, audio, bus) {
   function setMasterChat(index) {
     if (settings.get('masterFollowsChat') === 0) return;
     if (masterChat >= 0 && masterChat !== index) {
-      // 우리가 켠 것이면 뺀다. 원래 켜 두었던 것이면 남기되 가장 작은 칸(맨 뒤)으로 민다.
-      panes = masterChatAuto
-        ? panes.filter((i) => i !== masterChat)
-        : [...panes.filter((i) => i !== masterChat), masterChat];
+      const old = leafOfStream(masterChat);
+      // 우리가 켠 것이면 닫는다. 원래 켜 두었던 것이면 남기되 가장 작은 칸으로 민다.
+      if (old && masterChatAuto) closePane(old.id);
+      else if (old) {
+        const smallest = smallestLeaf();
+        if (smallest && smallest.id !== old.id) swapStreams(old, smallest);
+      }
       masterChat = -1;
       masterChatAuto = false;
     }
     if (index < 0 || !chats.usable.includes(index)) return;
-    masterChatAuto = !panes.includes(index);
-    panes = [index, ...panes.filter((i) => i !== index)];
-    masterChat = index;
     chatVisible = true;
+    masterChatAuto = !leafOfStream(index);
+    // 없으면 칸을 하나 늘려서라도 띄운다. 자리가 없으면 가장 큰 칸을 갈아끼운다.
+    if (masterChatAuto && !addPane(index)) {
+      const big = largestLeaf();
+      if (big) big.stream = index;
+      masterChatAuto = false;
+    }
+    const holder = leafOfStream(index);
+    const big = largestLeaf();
+    if (holder && big && holder.id !== big.id) swapStreams(holder, big);
+    masterChat = index;
+  }
+
+  /** 가장 작은 칸. 마스터에서 내려온 채팅이 밀려나는 자리다. */
+  function smallestLeaf() {
+    const list = panes.leaves(tree);
+    if (!chatRegion) return list[list.length - 1];
+    const boxes = panes.rects(tree, chatRegion, TILE_GAP);
+    return list.reduce((best, l) => {
+      const a = boxes.get(l.id);
+      const b = boxes.get(best.id);
+      return a && b && a.w * a.h < b.w * b.h ? l : best;
+    }, list[0]);
   }
 
   /**
@@ -233,22 +330,136 @@ export function startLayout(hooks, chatsRoot, chats, audio, bus) {
    */
   function switchPane(index) {
     chatVisible = true;
-    if (panes.includes(index)) return null;
-    if (panes[panes.length - 1] === masterChat) masterChat = -1;
-    panes = panes.length === 0 ? [index] : [...panes.slice(0, -1), index];
+    if (leafOfStream(index)) return null;
+    const target = newestLeaf();
+    if (target.stream === masterChat) masterChat = -1;
+    target.stream = index;
     return '\u{1F504}\u{1F4AC}';
   }
 
   /**
-   * 프레임이 보낸 클릭 좌표를 문서 좌표로 옮겨 그 자리에 알림을 띄운다.
+   * 프레임이 보낸 좌표를 문서 좌표로 옮긴다. 그 방송 타일의 원점을 더하면 된다.
    * @param {number} index
    * @param {import('./frames.js').FrameMessage} data
-   * @param {string} text
    */
-  function toastAt(index, data, text) {
+  function docPoint(index, data) {
     const r = videoRects.get(index);
-    if (!r) return;
-    showToast(text, r.x + (Number(data.x) || r.w / 2), r.y + (Number(data.y) || r.h / 2));
+    if (!r) return null;
+    return { x: r.x + (Number(data.x) || r.w / 2), y: r.y + (Number(data.y) || r.h / 2) };
+  }
+
+  // --- 우클릭 드래그 ---
+  // 영상에서 우클릭으로 잡아 채팅 영역에 떨어뜨리면 그 자리에 채팅이 붙는다.
+  // 안 끌고 그냥 놓으면 예전과 같은 우클릭 동작이다.
+  /** @type {{ stream: number, shift: boolean, x: number, y: number, moved: boolean } | null} */
+  let rcDrag = null;
+  /** @type {import('./dropzone.js').Zone | null} */
+  let dropZone = null;
+  /** @type {HTMLDivElement | null} */
+  let dropShield = null;
+
+  /** @param {Event} e */
+  function swallowMenu(e) {
+    e.preventDefault();
+    e.stopPropagation();
+  }
+
+  /**
+   * @param {import('./dropzone.js').Zone | null} a
+   * @param {import('./dropzone.js').Zone | null} b
+   */
+  function sameZone(a, b) {
+    if (!a || !b) return a === b;
+    if (a.kind !== b.kind) return false;
+    const ai = a.kind === 'edge' ? -1 : a.id;
+    const bi = b.kind === 'edge' ? -1 : b.id;
+    const as = a.kind === 'center' ? '' : a.side;
+    const bs = b.kind === 'center' ? '' : b.side;
+    return ai === bi && as === bs;
+  }
+
+  /**
+   * @param {number} stream
+   * @param {boolean} shift
+   * @param {number} x
+   * @param {number} y
+   */
+  function startRightDrag(stream, shift, x, y) {
+    if (rcDrag) return;
+    rcDrag = { stream, shift, x, y, moved: false };
+    dropZone = null;
+    // iframe이 pointermove를 삼키지 않도록 화면 전체를 덮는다. 뗀 신호도 여기서 받는다.
+    dropShield = document.createElement('div');
+    dropShield.style.cssText = 'position:fixed;inset:0;z-index:2147483646;cursor:copy';
+    document.body.append(dropShield);
+    document.addEventListener('pointermove', onDragMove);
+    document.addEventListener('pointerup', onDragUp);
+    document.addEventListener('pointercancel', cancelDrag);
+    document.addEventListener('keydown', onDragKey);
+    window.addEventListener('blur', cancelDrag);
+    document.addEventListener('contextmenu', swallowMenu, true);
+    schedule();
+  }
+
+  /** 창 밖에서 손을 떼는 등으로 뗀 신호를 놓치면 실드가 남아 페이지 전체가 먹통이 된다. */
+  function cancelDrag() {
+    if (!rcDrag) return;
+    endRightDrag();
+    schedule();
+  }
+
+  /** @param {KeyboardEvent} e */
+  function onDragKey(e) {
+    if (e.key === 'Escape') cancelDrag();
+  }
+
+  function endRightDrag() {
+    document.removeEventListener('pointermove', onDragMove);
+    document.removeEventListener('pointerup', onDragUp);
+    document.removeEventListener('pointercancel', cancelDrag);
+    document.removeEventListener('keydown', onDragKey);
+    window.removeEventListener('blur', cancelDrag);
+    dropShield?.remove();
+    dropShield = null;
+    rcDrag = null;
+    dropZone = null;
+    // 우클릭 메뉴는 플랫폼에 따라 뗀 뒤에 온다. 그 한 번까지 막고 나서 푼다.
+    setTimeout(() => document.removeEventListener('contextmenu', swallowMenu, true), MENU_GRACE_MS);
+  }
+
+  /** @param {PointerEvent} e */
+  function onDragMove(e) {
+    if (!rcDrag) return;
+    if (Math.abs(e.clientX - rcDrag.x) + Math.abs(e.clientY - rcDrag.y) > DRAG_SLOP) rcDrag.moved = true;
+    const next = chatVisible && chatRegion ? zoneAt(e.clientX, e.clientY, chatRegion, paneBoxes) : null;
+    if (sameZone(next, dropZone)) return;
+    dropZone = next;
+    schedule();
+  }
+
+  /** @param {PointerEvent} e */
+  function onDragUp(e) {
+    finishRightDrag(e.clientX, e.clientY);
+  }
+
+  /**
+   * @param {number} x
+   * @param {number} y
+   */
+  function finishRightDrag(x, y) {
+    const drag = rcDrag;
+    if (!drag) return;
+    const zone = chatVisible && chatRegion ? zoneAt(x, y, chatRegion, paneBoxes) : null;
+    endRightDrag();
+    preview = -1;
+    const done =
+      drag.moved && zone
+        ? applyDrop(zone, drag.stream)
+        : drag.shift
+          ? togglePane(drag.stream)
+          : switchPane(drag.stream);
+    if (done) showToast(done, x, y);
+    schedule();
   }
 
   /**
@@ -262,23 +473,47 @@ export function startLayout(hooks, chatsRoot, chats, audio, bus) {
     if (index === masterChat) masterChatAuto = false;
     if (!chatVisible) {
       chatVisible = true;
-      if (!panes.includes(index)) panes.push(index);
+      if (!leafOfStream(index)) addPane(index);
       return '➕\u{1F4AC}';
     }
-    if (panes.includes(index)) {
-      const rest = panes.filter((i) => i !== index);
-      if (rest.length === 0) {
-        // 다시 펼 때 빈 패널이 나오지 않게 목록은 남겨 둔다.
-        chatVisible = false;
-        return '➖\u{1F4AC}';
-      }
-      if (index === masterChat) masterChat = -1;
-      panes = rest;
-      return '➖\u{1F4AC}';
-    }
+    const held = leafOfStream(index);
+    if (held) return closePane(held.id);
     // 자리가 없으면 조용히 무시한다. 억지로 넣으면 있던 칸들까지 못 쓰게 된다.
-    if (!paneRoom(panes.length + 1)) return null;
-    panes.push(index);
+    return addPane(index) ? '➕\u{1F4AC}' : null;
+  }
+
+  /**
+   * 채팅 영역에 떨어뜨렸을 때. 가운데면 그 칸을 갈아끼우고, 가장자리면 그쪽으로 쪼갠다.
+   * 한 방송이 두 칸에 있을 수 없으므로, 이미 떠 있으면 자리를 맞바꾸거나 원래 칸을 걷어낸다.
+   * @param {import('./dropzone.js').Zone} zone
+   * @param {number} stream
+   * @returns {string | null}
+   */
+  function applyDrop(zone, stream) {
+    chatVisible = true;
+    const held = leafOfStream(stream);
+    if (zone.kind === 'center') {
+      const target = panes.findLeaf(tree, zone.id);
+      if (!target || held?.id === target.id) return null;
+      if (held) swapStreams(held, target);
+      else {
+        if (target.stream === masterChat) masterChat = -1;
+        target.stream = stream;
+      }
+      return '\u{1F504}\u{1F4AC}';
+    }
+    // 쪼개서 새 칸을 만든다. 이미 떠 있던 칸은 걷어낸다.
+    if (held && zone.kind === 'pane' && zone.id === held.id) return null;
+    let base = tree;
+    if (held) {
+      if (panes.leaves(base).length === 1) return null;
+      base = panes.remove(base, held.id);
+    }
+    const next =
+      zone.kind === 'edge' ? panes.wrap(base, zone.side, stream) : panes.insert(base, zone.id, zone.side, stream);
+    if (chatRegion && !panes.fits(next, chatRegion, TILE_GAP, MIN_PANE_WIDTH, MIN_PANE_HEIGHT)) return null;
+    if (held && held.stream === masterChat) masterChat = -1;
+    tree = next;
     return '➕\u{1F4AC}';
   }
 
@@ -344,26 +579,38 @@ export function startLayout(hooks, chatsRoot, chats, audio, bus) {
 
     const region = columns ? null : layout.chats[0] ?? null;
     chatRegion = region;
-    let visible = columns ? chats.usable : chatVisible ? visiblePanes() : [];
 
     // 지금 화면에 자리를 가진 채팅과 그 사각형. 열 모드에서는 채팅이 자기 영상을 따라간다.
     /** @type {Map<number, import('./geometry.js').Rect>} */
     const slots = new Map();
+    /** @type {number[]} */
+    const visible = [];
+    paneBoxes = new Map();
     if (columns) {
+      visible.push(...chats.usable);
       layout.chats.forEach((r, slot) => {
         const stream = slotStream[slot];
         if (visible.includes(stream)) slots.set(stream, r);
       });
-    } else if (visible.length > 0 && region) {
-      // 창이 줄어 다 못 담게 되면 뒤에서부터 덜어낸다. 우겨넣어 전부 못 쓰게 만들지 않는다.
-      let rects = null;
-      while (visible.length > 1 && !(rects = splitChatPanes(region, visible.length, MIN_PANE_WIDTH, MIN_PANE_HEIGHT, gap))) {
-        visible = visible.slice(0, -1);
+    } else if (chatVisible && region) {
+      // 창이 줄어 다 못 담게 되면 나중에 생긴 칸부터 덜어낸 **사본**으로 그린다.
+      // 저장된 트리는 그대로 둬서 창을 도로 넓히면 되살아난다.
+      const shown = panes.trimToFit(tree, region, gap, MIN_PANE_WIDTH, MIN_PANE_HEIGHT);
+      paneBoxes = panes.rects(shown, region, gap);
+      const list = panes.leaves(shown);
+      const newest = list.reduce((best, l) => (l.id > best.id ? l : best), list[0]);
+      // 호버 미리보기는 가장 나중에 생긴 칸 하나만 갈아끼운다. 배치는 흔들리지 않는다.
+      const peek =
+        preview >= 0 && settings.get('chatHoverPreview') !== 0 && !list.some((l) => l.stream === preview)
+          ? preview
+          : -1;
+      for (const leafNode of list) {
+        const stream = peek >= 0 && leafNode.id === newest.id ? peek : leafNode.stream;
+        const r = paneBoxes.get(leafNode.id);
+        if (!r || !chats.usable.includes(stream) || slots.has(stream)) continue;
+        slots.set(stream, r);
+        visible.push(stream);
       }
-      if (!rects) rects = [region];
-      visible.forEach((stream, i) => {
-        if (rects[i]) slots.set(stream, rects[i]);
-      });
     }
     const current = visible[0] ?? -1;
 
@@ -407,6 +654,13 @@ export function startLayout(hooks, chatsRoot, chats, audio, bus) {
     if (columns || !chatVisible) rules.push('#mlpp-resizer { display: none !important; }');
     else if (layout.resizer) rules.push(place('#mlpp-resizer', layout.resizer, 'display: block !important;'));
 
+    // 우클릭 드래그 중이면 채팅 영역 전체를 흐리고, 새 칸이 생길 자리를 파랗게 보여 준다.
+    if (rcDrag && region && chatVisible) {
+      rules.push(place('#mlpp-dropbg', region, 'display: block !important;'));
+      const box = dropZone ? previewRect(dropZone, region, paneBoxes) : null;
+      if (box) rules.push(place('#mlpp-drop', box, 'display: block !important;'));
+    }
+
     // 토글 아이콘은 페이지가 #chat의 src로 판단하지만 우리는 #chat을 비워두므로 직접 정한다.
     rules.push(`#chat-toggle .open { display: ${chatVisible ? 'none' : 'inline'} !important; }`);
     rules.push(`#chat-toggle .close { display: ${chatVisible ? 'inline' : 'none'} !important; }`);
@@ -416,7 +670,8 @@ export function startLayout(hooks, chatsRoot, chats, audio, bus) {
     // 설정끼리 서로를 죽이는 상황(수동 격자가 열 모드를 끄는 등)을 눈으로 확인하기 어렵다.
     document.documentElement.dataset.mlppLayout =
       `mode=${layout.mode} master=${master} chat=${visible.join('+') || -1}` +
-      ` panes=[${panes.join(',')}] mchat=${masterChat}${masterChatAuto ? '(auto)' : ''}` +
+      ` panes=[${panes.leaves(tree).map((l) => l.stream).join(',')}]` +
+      ` mchat=${masterChat}${masterChatAuto ? '(auto)' : ''}` +
       ` slots=[${slotStream.join(',')}] grid=${forceCols}x${forceRows} setting=${mode}` +
       ` stack=${settings.stackPlacement()}`;
     dnd.update(layout.videos);
@@ -444,10 +699,11 @@ export function startLayout(hooks, chatsRoot, chats, audio, bus) {
       e.stopPropagation();
       if (hooks.chatSelect.value === 'about:blank') {
         chatVisible = false;
-        if (panes[0] >= 0) hooks.chatSelect.selectedIndex = panes[0];
       } else {
         // 페이지의 드롭다운은 "이 채팅을 봐라"는 뜻이다. 쪼개 놓은 것을 한 칸으로 되돌린다.
-        panes = [hooks.chatSelect.selectedIndex];
+        tree = panes.leaf(hooks.chatSelect.selectedIndex);
+        masterChat = -1;
+        masterChatAuto = false;
         preview = -1;
         chatVisible = true;
       }
@@ -520,6 +776,11 @@ export function startLayout(hooks, chatsRoot, chats, audio, bus) {
   // 사이드 모드에서 영상에 호버하면 그 방송 채팅을 잠깐 보여주고, 우클릭하면 진짜로 넘어간다.
   // 열 모드는 채팅이 전부 보이므로 해당 없다.
   bus.on((index, data) => {
+    // 위치 교환은 채팅과 무관하다. 가드보다 앞에 둔다.
+    if (data.kind === 'alt') {
+      dnd.setFrameAlt(index, !!data.on);
+      return;
+    }
     // 마스터 앤 스택은 영상 배치라 그 방송의 채팅을 쓸 수 있는지와 무관하다. 가드보다 앞에 둔다.
     if (data.kind === 'master') {
       // 마스터를 다시 누르면 해제, 다른 화면을 누르면 그쪽이 마스터가 된다.
@@ -548,13 +809,25 @@ export function startLayout(hooks, chatsRoot, chats, audio, bus) {
         preview = -1;
       }
       schedule();
-    } else if (data.kind === 'commit') {
-      preview = -1;
-      const done = data.shift ? togglePane(index) : switchPane(index);
-      // 바뀐 게 없으면 알리지 않는다.
-      if (done) toastAt(index, data, done);
-      schedule();
+    } else if (data.kind === 'rcdown') {
+      const at = docPoint(index, data);
+      if (at) startRightDrag(index, !!data.shift, at.x, at.y);
+    } else if (data.kind === 'rcup') {
+      // 실드가 깔리기 전에 손을 뗐을 때를 위한 보강. 실드가 먼저 받았으면 여기서는 아무 일도 없다.
+      const at = docPoint(index, data);
+      if (at) finishRightDrag(at.x, at.y);
     }
+  });
+
+  // 채팅 칸 안에서 Shift+우클릭하면 그 칸을 닫는다. 그냥 우클릭은 채팅에 넘긴다.
+  chats.onMessage((index, data) => {
+    if (data.kind !== 'close') return;
+    const held = leafOfStream(index);
+    if (!held) return;
+    const box = paneBoxes.get(held.id);
+    const done = closePane(held.id);
+    if (done && box) showToast(done, box.x + box.w / 2, box.y + box.h / 2);
+    schedule();
   });
 
   window.addEventListener('resize', schedule);

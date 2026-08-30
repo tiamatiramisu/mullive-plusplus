@@ -15,11 +15,9 @@
 // @match        https://mul.live/*
 // @match        https://www.mul.live/*
 // SOOP 플레이어 프레임 안에서도 돌아야 음소거를 조작하고 호버를 감지할 수 있다.
-// 채팅 프레임은 할 일이 없으므로 제외한다.
+// 채팅 프레임에서도 Shift+우클릭 하나만 받는다(칸 닫기). 역할은 main.js 가 가른다.
 // @match        https://play.sooplive.com/*
 // @match        https://play.sooplive.co.kr/*
-// @exclude      https://play.sooplive.com/*vtype=chat*
-// @exclude      https://play.sooplive.co.kr/*vtype=chat*
 // @grant        GM_addStyle
 // @grant        GM_setValue
 // @grant        GM_getValue

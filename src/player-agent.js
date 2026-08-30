@@ -203,14 +203,43 @@ export function startPlayerAgent() {
     report({ kind: 'hover', on });
   }
 
+  // Alt(위치 교환 모드)도 여기서 알려야 한다.
+  // 키 이벤트는 포커스를 가진 문서에만 간다. 플레이어를 한 번 클릭하면 포커스가 이 프레임으로
+  // 넘어와 부모는 Alt를 영영 못 본다. 마우스 이벤트의 altKey는 포커스와 무관하게 실려 오므로
+  // 키와 마우스 양쪽에서 읽는다.
+  let alting = false;
+  /** @param {boolean} on */
+  function setAlt(on) {
+    if (alting === on) return;
+    alting = on;
+    report({ kind: 'alt', on });
+  }
+
   const root = document.documentElement;
-  root.addEventListener('mouseenter', () => setHover(true));
-  root.addEventListener('mousemove', () => setHover(true));
-  root.addEventListener('mouseleave', () => setHover(false));
+  root.addEventListener('mouseenter', (e) => {
+    setHover(true);
+    setAlt(e.altKey);
+  });
+  root.addEventListener('mousemove', (e) => {
+    setHover(true);
+    setAlt(e.altKey);
+  });
+  root.addEventListener('mouseleave', () => {
+    setHover(false);
+    setAlt(false);
+  });
+  window.addEventListener('keydown', (e) => setAlt(e.altKey || e.key === 'Alt'));
+  window.addEventListener('keyup', (e) => setAlt(e.key === 'Alt' ? false : e.altKey));
   // 탭을 벗어나거나 가려지면 호버가 남아 있지 않게 한다.
-  window.addEventListener('blur', () => setHover(false));
+  window.addEventListener('blur', () => {
+    setHover(false);
+    setAlt(false);
+  });
   document.addEventListener('visibilitychange', () => {
-    if (document.hidden) setHover(false);
+    if (document.hidden) {
+      setHover(false);
+      setAlt(false);
+    }
   });
 
   // 가운데 클릭은 우리가 가져간다. 캡처 단계에서 막아야 플레이어의 재생/정지가 같이 걸리지 않는다.
@@ -226,15 +255,36 @@ export function startPlayerAgent() {
     true,
   );
 
-  // 우클릭은 사이드 채팅을 이 방송으로 확정하고, Shift를 누르고 있으면 칸을 넣고 뺀다.
+  // 우클릭은 부모가 처리한다. 누른 순간과 뗀 순간을 따로 알려야 "끌어서 채팅 칸에 떨어뜨리기"가 된다.
   // 가운데 영역에서만 가져가고 가장자리는 플레이어의 기본 메뉴에 넘긴다.
+  window.addEventListener(
+    'mousedown',
+    (e) => {
+      if (e.button !== 2 || !parentOrigin || !inCenter(e)) return;
+      e.stopPropagation();
+      e.preventDefault();
+      report({ kind: 'rcdown', shift: e.shiftKey, x: e.clientX, y: e.clientY });
+    },
+    true,
+  );
+  // 부모가 실드를 깔기 전에 손을 떼면 뗀 신호가 부모에 안 간다. 프레임에서도 알려 준다.
+  window.addEventListener(
+    'mouseup',
+    (e) => {
+      if (e.button !== 2 || !parentOrigin || !inCenter(e)) return;
+      e.stopPropagation();
+      e.preventDefault();
+      report({ kind: 'rcup', x: e.clientX, y: e.clientY });
+    },
+    true,
+  );
+  // 기본 메뉴만 막는다. 판정은 위의 누름/뗌으로 한다.
   window.addEventListener(
     'contextmenu',
     (e) => {
       if (!parentOrigin || !inCenter(e)) return;
       e.stopPropagation();
       e.preventDefault();
-      report({ kind: 'commit', shift: e.shiftKey, x: e.clientX, y: e.clientY });
     },
     true,
   );

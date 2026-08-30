@@ -10,6 +10,17 @@ import { setStyle } from './style.js';
  * 조작은 Alt(맥에서는 Option)를 누른 동안만 활성화된다.
  * 상시 핸들을 얹으면 플레이어 UI를 가리고 클릭을 먹기 때문에,
  * 평소 오버레이는 투명하고 pointer-events: none 이라 플레이어 조작을 전혀 방해하지 않는다.
+ *
+ * Alt를 알아내는 게 까다롭다. 키 이벤트는 포커스를 가진 문서에만 가는데,
+ * 플레이어를 한 번 클릭하면 포커스가 교차 출처 iframe으로 넘어가 부모는 아무것도 못 받는다.
+ * 그래서 셋을 겹쳐 쓴다.
+ *
+ * 1. 부모의 키 이벤트 — 포커스가 페이지에 있을 때
+ * 2. 부모의 `mousemove.altKey` — 마우스 이벤트는 포커스와 무관하게 altKey를 싣고 온다
+ * 3. 프레임 안 에이전트의 보고 — 포커스가 플레이어에 있을 때
+ *
+ * 커서가 부모 쪽 요소 위에 있으면 부모가 사실을 안다. 그때는 프레임이 남긴 표시를 싹 지운다.
+ * (오버레이가 켜지는 순간 마우스는 부모 것이 되므로 프레임의 표시가 갇힐 일이 없다.)
  */
 
 const MODIFIER_HINT = 'Alt(Option)을 누른 채 끌어서 위치 교환';
@@ -45,15 +56,17 @@ html.mlpp-swap .mlpp-tile {
   display: flex !important;
   pointer-events: auto !important;
 }
-html.mlpp-swap .mlpp-tile:hover { border-color: #7aa2f7 !important; }
+/* 잡기 전 호버는 색을 쓰지 않는다. 보라와 파랑은 끄는 동안의 뜻이 정해져 있다. */
+html.mlpp-swap .mlpp-tile:hover { border-color: rgba(255, 255, 255, 0.7) !important; }
+/* 잡은 곳은 보라, 놓을 곳은 파랑. */
 .mlpp-tile.mlpp-from {
-  border-color: #7aa2f7 !important;
-  background-color: rgba(122, 162, 247, 0.25) !important;
+  border-color: #bb9af7 !important;
+  background-color: rgba(187, 154, 247, 0.25) !important;
   cursor: grabbing !important;
 }
 .mlpp-tile.mlpp-over {
-  border-color: #9ece6a !important;
-  background-color: rgba(158, 206, 106, 0.25) !important;
+  border-color: #7aa2f7 !important;
+  background-color: rgba(122, 162, 247, 0.25) !important;
 }
 `;
 
@@ -70,6 +83,10 @@ export function createDragSwap({ root, labelOf, swap, schedule }) {
   /** @type {Map<number, HTMLElement>} */
   const overlays = new Map();
   let active = false;
+  /** 부모가 직접 본 Alt */
+  let selfAlt = false;
+  /** Alt를 누르고 있다고 알려온 프레임들 */
+  const frameAlt = new Set();
   let from = -1;
   let over = -1;
   /** @type {HTMLDivElement | null} */
@@ -117,10 +134,16 @@ export function createDragSwap({ root, labelOf, swap, schedule }) {
 
   /** @param {boolean} next */
   function setActive(next) {
+    // 이미 타일을 잡고 있으면 놓지 않는다. 끌던 도중에 Alt를 놓아도 드롭까지는 마치게 한다.
+    if (!next && from >= 0) return;
     if (active === next) return;
     active = next;
     document.documentElement.classList.toggle('mlpp-swap', active);
     if (!active) endDrag(false);
+  }
+
+  function refresh() {
+    setActive(selfAlt || frameAlt.size > 0);
   }
 
   /** @param {PointerEvent} e @param {number} slot */
@@ -157,10 +180,13 @@ export function createDragSwap({ root, labelOf, swap, schedule }) {
       swap(source, target);
       schedule();
     }
+    // 잡고 있는 동안 미뤄 둔 해제를 이제 반영한다.
+    refresh();
   }
 
   function onCancel() {
     endDrag(true);
+    refresh();
   }
 
   /** @param {boolean} repaint */
@@ -175,16 +201,46 @@ export function createDragSwap({ root, labelOf, swap, schedule }) {
     if (repaint) paint();
   }
 
-  // Alt를 누르고 있는 동안만 활성화한다. 창 포커스를 잃으면 눌린 상태가 남지 않게 푼다.
   window.addEventListener('keydown', (e) => {
-    if (e.key === 'Alt') setActive(true);
+    if (!e.altKey && e.key !== 'Alt') return;
+    selfAlt = true;
+    refresh();
   });
   window.addEventListener('keyup', (e) => {
-    if (e.key === 'Alt') setActive(false);
+    if (e.key !== 'Alt' && e.altKey) return;
+    selfAlt = false;
+    refresh();
   });
-  window.addEventListener('blur', () => setActive(false));
+  // 커서가 부모 쪽에 있으면 부모가 사실을 안다. 프레임이 남긴 표시도 같이 정리한다.
+  document.addEventListener('mousemove', (e) => {
+    if (selfAlt === e.altKey && (e.altKey || frameAlt.size === 0)) return;
+    selfAlt = e.altKey;
+    if (!e.altKey) frameAlt.clear();
+    refresh();
+  });
+  // 창 포커스를 잃어도 프레임 쪽은 살아 있을 수 있다. 부모 것만 푼다.
+  window.addEventListener('blur', () => {
+    selfAlt = false;
+    refresh();
+  });
+  document.addEventListener('visibilitychange', () => {
+    if (!document.hidden) return;
+    selfAlt = false;
+    frameAlt.clear();
+    refresh();
+  });
 
   return {
+    /**
+     * 프레임 안 에이전트가 알려온 Alt 상태.
+     * @param {number} index
+     * @param {boolean} on
+     */
+    setFrameAlt(index, on) {
+      if (on) frameAlt.add(index);
+      else frameAlt.delete(index);
+      refresh();
+    },
     /** @param {import('./geometry.js').Rect[]} videoRects */
     update(videoRects) {
       rects = videoRects;

@@ -8,6 +8,7 @@ import { createFrameBus } from './frames.js';
 import { startLayout } from './layout.js';
 import { createSettingsPanel } from './panel.js';
 import { startPlayerAgent } from './player-agent.js';
+import { startChatAgent } from './chat-agent.js';
 import { watchPlayers, isPlayerReady, onPlayerReady, timedOut } from './ready.js';
 
 const VERSION = typeof GM_info !== 'undefined' ? GM_info.script.version : 'dev';
@@ -15,9 +16,11 @@ const VERSION = typeof GM_info !== 'undefined' ? GM_info.script.version : 'dev';
 const SOOP_HOST = /^play\.sooplive\.(com|co\.kr)$/;
 const SOOP_CHAT = /^https:\/\/play\.sooplive\.(com|co\.kr)\//;
 
-// 이 스크립트는 mul.live 와 그 안의 SOOP 플레이어 프레임 양쪽에서 돈다. 역할을 먼저 가른다.
+// 이 스크립트는 mul.live 와 그 안의 SOOP 프레임들에서 돈다. 역할을 먼저 가른다.
+// 채팅 프레임은 플레이어 프레임과 같은 호스트라 URL 의 vtype 으로만 구별된다.
 if (SOOP_HOST.test(location.hostname)) {
-  startPlayerAgent();
+  if (/vtype=chat/.test(location.search)) startChatAgent();
+  else startPlayerAgent();
 } else {
   // 플레이어 준비 신호는 훅을 찾기 전에도 올 수 있다. 가장 먼저 걸어둔다.
   watchPlayers();

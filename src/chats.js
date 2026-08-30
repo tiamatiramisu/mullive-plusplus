@@ -42,6 +42,25 @@ export function createChatManager(hooks, root, canCreate) {
     loadListeners.add(fn);
   }
 
+  // 채팅 프레임 안의 에이전트가 보내는 것. 플레이어 프레임 버스(frames.js)와는 출처가 달라 따로 받는다.
+  /** @type {Set<(index: number, data: { kind?: string }) => void>} */
+  const messageListeners = new Set();
+  window.addEventListener('message', (e) => {
+    const data = /** @type {{ mlpp?: unknown, kind?: string } | null} */ (e.data);
+    if (!data || data.mlpp !== true) return;
+    let hit = -1;
+    for (const [index, frame] of frames) {
+      if (frame.contentWindow === e.source) hit = index;
+    }
+    if (hit < 0) return;
+    // 인사는 양쪽에서 한다. 우리가 먼저 떴을 수도, 프레임이 먼저 떴을 수도 있다.
+    if (data.kind === 'chatagent') {
+      /** @type {Window | null} */ (e.source)?.postMessage({ mlpp: true, kind: 'hello' }, e.origin);
+      return;
+    }
+    messageListeners.forEach((fn) => fn(hit, data));
+  });
+
   /**
    * 자리 표시자. 프레임이 없거나 아직 로드 중일 때 그 자리에 보인다.
    * @param {number} index
@@ -164,6 +183,10 @@ export function createChatManager(hooks, root, canCreate) {
     ensurePlaceholder,
     isLoaded,
     onFrameLoad,
+    /** @param {(index: number, data: { kind?: string }) => void} fn */
+    onMessage(fn) {
+      messageListeners.add(fn);
+    },
     sync,
     /** 선택 가능한 첫 채팅. 없으면 -1. */
     firstUsable: () => usable[0] ?? -1,
