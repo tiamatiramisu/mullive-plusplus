@@ -4,7 +4,7 @@
 // @name:en      Mul.Live Multiview Enhancer
 // @name:ja-JP   Mul.Live マルチビュー強化
 // @namespace    http://tampermonkey.net/
-// @version      0.5.1
+// @version      0.6.0
 // @license      MIT
 // @description       Resizable chat panel, background-persistent chats, smarter video grid layout and drag-to-swap tiles for Mul.Live.
 // @description:en    Resizable chat panel, background-persistent chats, smarter video grid layout and drag-to-swap tiles for Mul.Live.
@@ -14,6 +14,12 @@
 // @icon         https://mul.live/favicon.ico
 // @match        https://mul.live/*
 // @match        https://www.mul.live/*
+// SOOP 플레이어 프레임 안에서도 돌아야 음소거를 조작하고 호버를 감지할 수 있다.
+// 채팅 프레임은 할 일이 없으므로 제외한다.
+// @match        https://play.sooplive.com/*
+// @match        https://play.sooplive.co.kr/*
+// @exclude      https://play.sooplive.com/*vtype=chat*
+// @exclude      https://play.sooplive.co.kr/*vtype=chat*
 // @grant        GM_addStyle
 // @grant        GM_setValue
 // @grant        GM_getValue
@@ -411,6 +417,132 @@
     };
   }
 
+  // src/audio.js
+  var SOLO_GLOW = "rgba(76, 141, 255, 0.5)";
+  var MUTED_GLOW = "rgba(255, 77, 77, 0.45)";
+  var BASE_CSS = `
+#mlpp-glow {
+  position: absolute !important;
+  inset: 0 !important;
+  pointer-events: none !important;
+}
+.mlpp-audio {
+  position: absolute !important;
+  display: none !important;
+  box-sizing: border-box !important;
+  background: transparent !important;
+  border: 0 !important;
+  pointer-events: none !important;
+}
+`;
+  function createAudioMixer({ players, root }) {
+    const pinned = /* @__PURE__ */ new Set();
+    let hovered = -1;
+    let rects = /* @__PURE__ */ new Map();
+    const overlays = /* @__PURE__ */ new Map();
+    const sent = /* @__PURE__ */ new Map();
+    const agents = /* @__PURE__ */ new Set();
+    function active() {
+      const set2 = new Set(pinned);
+      if (hovered >= 0) set2.add(hovered);
+      return set2;
+    }
+    function indexOf(source) {
+      return players.findIndex((f) => f.contentWindow === source);
+    }
+    function send(index, data) {
+      const win = players[index]?.contentWindow;
+      if (!win) return;
+      win.postMessage({ mlpp: true, ...data }, "https://play.sooplive.com");
+      win.postMessage({ mlpp: true, ...data }, "https://play.sooplive.co.kr");
+    }
+    function ensureOverlay(index) {
+      const existing = overlays.get(index);
+      if (existing) return existing;
+      const el = document.createElement("div");
+      el.id = `mlpp-audio-${index}`;
+      el.className = "mlpp-audio";
+      root.append(el);
+      overlays.set(index, el);
+      return el;
+    }
+    function apply() {
+      const set2 = active();
+      const soloing = set2.size > 0;
+      players.forEach((_, index) => {
+        const muted = soloing && !set2.has(index);
+        if (sent.get(index) !== muted) {
+          sent.set(index, muted);
+          send(index, { kind: "mute", muted });
+        }
+      });
+      const hoveredKind = hovered < 0 ? null : set2.has(hovered) ? "solo" : "muted";
+      const rules = [BASE_CSS];
+      for (const [index, r] of rects) {
+        const el = ensureOverlay(index);
+        const kind = set2.has(index) ? "solo" : "muted";
+        if (!soloing || hoveredKind === null || kind !== hoveredKind) {
+          rules.push(`#${el.id} { display: none !important; }`);
+          continue;
+        }
+        const glow = kind === "solo" ? SOLO_GLOW : MUTED_GLOW;
+        rules.push(
+          `#${el.id} { display: block !important; left: ${r.x}px !important; top: ${r.y}px !important; width: ${r.w}px !important; height: ${r.h}px !important; box-shadow: 0 0 16px 3px ${glow} !important; }`
+        );
+      }
+      setStyle("audio", rules.join("\n"));
+      document.documentElement.dataset.mlppAudio = `pinned=[${[...pinned].join(",")}] hovered=${hovered} muted=[${players.map((_, i) => soloing && !set2.has(i) ? i : null).filter((i) => i !== null).join(",")}] agents=[${[...agents].join(",")}]`;
+    }
+    window.addEventListener("message", (e) => {
+      if (!/^https:\/\/play\.sooplive\.(com|co\.kr)$/.test(e.origin)) return;
+      const data = (
+        /** @type {{ mlpp?: unknown, kind?: string, on?: unknown } | null} */
+        e.data
+      );
+      if (!data || data.mlpp !== true) return;
+      const index = indexOf(e.source);
+      if (index < 0) return;
+      switch (data.kind) {
+        case "agent":
+          send(index, { kind: "hello" });
+          sent.delete(index);
+          apply();
+          break;
+        case "ready":
+          agents.add(index);
+          apply();
+          break;
+        case "hover":
+          if (data.on) hovered = index;
+          else if (hovered === index) hovered = -1;
+          apply();
+          break;
+        case "toggle":
+          if (pinned.has(index)) pinned.delete(index);
+          else pinned.add(index);
+          apply();
+          break;
+      }
+    });
+    return {
+      /** 플레이어가 준비되면 부른다. 에이전트가 먼저 올라와 있을 수도 있어 양쪽에서 인사한다. */
+      greet(index) {
+        send(index, { kind: "hello" });
+      },
+      /** @param {Map<number, import('./geometry.js').Rect>} next 스트림별 화면 위치 */
+      update(next) {
+        rects = next;
+        apply();
+      },
+      /** 전부 들리는 상태로 되돌린다. */
+      reset() {
+        pinned.clear();
+        hovered = -1;
+        apply();
+      }
+    };
+  }
+
   // src/geometry.js
   var ASPECT = 16 / 9;
   var MIN_CHAT_HEIGHT = 160;
@@ -482,7 +614,7 @@
 
   // src/dnd.js
   var MODIFIER_HINT = "Alt(Option)을 누른 채 끌어서 위치 교환";
-  var BASE_CSS = `
+  var BASE_CSS2 = `
 .mlpp-tile {
   position: absolute !important;
   z-index: 6 !important;
@@ -549,7 +681,7 @@ html.mlpp-swap .mlpp-tile:hover { border-color: #7aa2f7 !important; }
       return rects.findIndex((r) => x >= r.x && x < r.x + r.w && y >= r.y && y < r.y + r.h);
     }
     function paint() {
-      const rules = [BASE_CSS];
+      const rules = [BASE_CSS2];
       rects.forEach((r, slot) => {
         const el = ensureOverlay(slot);
         const label = el.querySelector(".mlpp-tile-label");
@@ -635,7 +767,7 @@ html.mlpp-swap .mlpp-tile:hover { border-color: #7aa2f7 !important; }
   var SELECT_HEIGHT = 28;
   var MIN_CHAT_WIDTH = 240;
   var DEFAULT_CHAT_WIDTH = 350;
-  var BASE_CSS2 = `
+  var BASE_CSS3 = `
 #streams {
   position: absolute !important;
   inset: 0 !important;
@@ -664,7 +796,8 @@ html.mlpp-swap .mlpp-tile:hover { border-color: #7aa2f7 !important; }
   background-color: #141517 !important;
   pointer-events: auto !important;
 }
-#mlpp-chats .mlpp-placeholder {
+/* 개별 규칙(#mlpp-ph-N)이 이기도록 특정도를 낮게 둔다. audio.js 의 같은 주석 참고. */
+.mlpp-placeholder {
   position: absolute !important;
   z-index: 3 !important;
   display: none !important;
@@ -711,7 +844,7 @@ html.mlpp-swap .mlpp-tile:hover { border-color: #7aa2f7 !important; }
   function place(selector, r, extra = "") {
     return `${selector} { left: ${r.x}px !important; top: ${r.y}px !important; width: ${r.w}px !important; height: ${r.h}px !important; ${extra} }`;
   }
-  function startLayout(hooks, chatsRoot, chats) {
+  function startLayout(hooks, chatsRoot, chats, audio) {
     hooks.chatToggle.before(chatsRoot);
     chatsRoot.append(hooks.chatSelect);
     const resizer = document.createElement("div");
@@ -781,7 +914,7 @@ html.mlpp-swap .mlpp-tile:hover { border-color: #7aa2f7 !important; }
         slots.set(visible[0], layout.chats[0]);
       }
       const states = chats.sync(visible, get("chatLimit"));
-      const rules = [BASE_CSS2];
+      const rules = [BASE_CSS3];
       layout.videos.forEach((r, slot) => {
         rules.push(place(`#streams iframe:nth-child(${order[slot] + 1})`, r));
       });
@@ -822,6 +955,9 @@ html.mlpp-swap .mlpp-tile:hover { border-color: #7aa2f7 !important; }
       rules.push(`#chat-toggle .close { display: ${chatVisible ? "inline" : "none"} !important; }`);
       setStyle("layout", rules.join("\n"));
       dnd.update(layout.videos);
+      const byStream = /* @__PURE__ */ new Map();
+      layout.videos.forEach((r, slot) => byStream.set(order[slot], r));
+      audio.update(byStream);
     }
     function schedule() {
       if (timer) return;
@@ -899,6 +1035,84 @@ html.mlpp-swap .mlpp-tile:hover { border-color: #7aa2f7 !important; }
     return { schedule, render, resetOrder, swapHint: dnd.hint };
   }
 
+  // src/player-agent.js
+  var PARENT_ORIGIN = /^https:\/\/(www\.)?mul\.live$/;
+  var CENTER = { x0: 0.2, x1: 0.8, y0: 0.2, y1: 0.7 };
+  var parentOrigin = null;
+  function soundButton() {
+    return document.getElementById("btn_sound");
+  }
+  function isMuted() {
+    const btn = soundButton();
+    return !!btn && btn.classList.contains("mute");
+  }
+  function setMuted(want) {
+    const btn = soundButton();
+    if (!btn) return false;
+    if (isMuted() !== want) btn.click();
+    return true;
+  }
+  function report(data) {
+    if (!parentOrigin) return;
+    window.parent.postMessage({ mlpp: true, ...data }, parentOrigin);
+  }
+  function inCenter(e) {
+    const w = window.innerWidth;
+    const h = window.innerHeight;
+    const x = e.clientX / w;
+    const y = e.clientY / h;
+    return x >= CENTER.x0 && x <= CENTER.x1 && y >= CENTER.y0 && y <= CENTER.y1;
+  }
+  function startPlayerAgent() {
+    if (window.top === window) return;
+    window.addEventListener("message", (e) => {
+      if (!PARENT_ORIGIN.test(e.origin)) return;
+      const data = (
+        /** @type {{ mlpp?: unknown, kind?: string, muted?: unknown } | null} */
+        e.data
+      );
+      if (!data || data.mlpp !== true) return;
+      if (data.kind === "hello") {
+        parentOrigin = e.origin;
+        report({ kind: "ready", hasButton: !!soundButton() });
+      } else if (data.kind === "mute") {
+        const ok = setMuted(!!data.muted);
+        if (!ok) {
+          const observer = new MutationObserver(() => {
+            if (setMuted(!!data.muted)) observer.disconnect();
+          });
+          observer.observe(document.documentElement, { childList: true, subtree: true });
+          setTimeout(() => observer.disconnect(), 15e3);
+        }
+      }
+    });
+    let hovering = false;
+    function setHover(on) {
+      if (hovering === on) return;
+      hovering = on;
+      report({ kind: "hover", on });
+    }
+    const root = document.documentElement;
+    root.addEventListener("mouseenter", () => setHover(true));
+    root.addEventListener("mousemove", () => setHover(true));
+    root.addEventListener("mouseleave", () => setHover(false));
+    window.addEventListener("blur", () => setHover(false));
+    document.addEventListener("visibilitychange", () => {
+      if (document.hidden) setHover(false);
+    });
+    window.addEventListener(
+      "click",
+      (e) => {
+        if (!parentOrigin || !inCenter(e)) return;
+        e.stopPropagation();
+        e.preventDefault();
+        report({ kind: "toggle" });
+      },
+      true
+    );
+    window.parent.postMessage({ mlpp: true, kind: "agent" }, "*");
+  }
+
   // src/ready.js
   var SOOP_ORIGIN = /^https:\/\/play\.sooplive\.(com|co\.kr)$/;
   var SETTLE_MS = 500;
@@ -950,14 +1164,19 @@ html.mlpp-swap .mlpp-tile:hover { border-color: #7aa2f7 !important; }
 
   // src/main.js
   var VERSION = typeof GM_info !== "undefined" ? GM_info.script.version : "dev";
+  var SOOP_HOST = /^play\.sooplive\.(com|co\.kr)$/;
   var SOOP_CHAT = /^https:\/\/play\.sooplive\.(com|co\.kr)\//;
-  watchPlayers();
-  var cspReports = 0;
-  document.addEventListener("securitypolicyviolation", (e) => {
-    if (++cspReports > 3) return;
-    warn(`CSP violation (${cspReports}/3):`, e.violatedDirective, "<-", e.blockedURI);
-  });
-  main();
+  if (SOOP_HOST.test(location.hostname)) {
+    startPlayerAgent();
+  } else {
+    watchPlayers();
+    let cspReports = 0;
+    document.addEventListener("securitypolicyviolation", (e) => {
+      if (++cspReports > 3) return;
+      warn(`CSP violation (${cspReports}/3):`, e.violatedDirective, "<-", e.blockedURI);
+    });
+    main();
+  }
   async function main() {
     const hooks = await waitForHooks();
     if (!hooks) {
@@ -974,13 +1193,19 @@ html.mlpp-swap .mlpp-tile:hover { border-color: #7aa2f7 !important; }
     const chatsRoot = document.createElement("div");
     chatsRoot.id = "mlpp-chats";
     const chats = createChatManager(hooks, chatsRoot, canCreate);
-    const layout = startLayout(hooks, chatsRoot, chats);
+    const glowRoot = document.createElement("div");
+    glowRoot.id = "mlpp-glow";
+    hooks.streams.before(glowRoot);
+    const audio = createAudioMixer({ players: hooks.players, root: glowRoot });
+    const layout = startLayout(hooks, chatsRoot, chats, audio);
     onPlayerReady(() => {
       if (timedOut()) warn("플레이어 준비 신호를 받지 못해 채팅을 그대로 만듭니다.");
+      hooks.players.forEach((_, i) => audio.greet(i));
       layout.schedule();
     });
     if (typeof GM_registerMenuCommand === "function") {
       GM_registerMenuCommand("영상 순서 초기화", () => layout.resetOrder());
+      GM_registerMenuCommand("솔로/음소거 해제", () => audio.reset());
     }
     log(`v${VERSION} booted`, {
       swap: layout.swapHint,
