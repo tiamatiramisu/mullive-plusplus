@@ -19,8 +19,6 @@ import * as settings from './settings.js';
 const SOLO_COLOR = 'rgb(96, 155, 255)';
 /** 파동이 가장 진할 때의 불투명도 */
 const RIPPLE_OPACITY = 0.6;
-/** 선이 타일 밖으로 이만큼 이동한다 */
-const RIPPLE_TRAVEL = 15;
 /** 한 발이 사라지기까지 걸리는 시간 */
 const RIPPLE_DURATION_MS = 1300;
 /** 실제 소리를 안 쓸 때 파동을 쏘는 주기 */
@@ -51,9 +49,8 @@ const BASE_CSS = `
   border: 0 !important;
   pointer-events: none !important;
 }
-/* 파동은 outline 과 outline-offset 으로 그린다.
-   box-shadow 의 spread 는 면을 채워서 사각형이 커지는 것처럼 보인다.
-   outline 은 두께가 그대로인 선이라, offset 만 키우면 선 하나가 밖으로 이동한다.
+/* 파동은 테두리에 고정된 선이 밝아졌다 사라지는 형태다. 선이 움직이지는 않는다.
+   outline 을 쓰는 이유는 box-shadow 의 spread 가 면을 채워 사각형처럼 보이기 때문이고,
    outline 은 레이아웃에 영향을 주지 않아 이웃을 밀지도 않는다.
 
    opacity 에 !important 를 붙이면 안 된다. CSS 캐스케이드에서 important 선언은
@@ -115,7 +112,7 @@ export function createAudioMixer({ players, root, bus }) {
   }
 
   /**
-   * 파동을 한 발 쏜다. 선 하나가 타일 밖으로 퍼져나가며 사라진다.
+   * 파동을 한 발 쏜다. 테두리 선이 밝아졌다가 사라진다.
    * 전체를 다시 그리지 않고 그 타일의 자식 하나만 애니메이션한다.
    * @param {number} index
    * @param {number} strength 0~1
@@ -124,12 +121,13 @@ export function createAudioMixer({ players, root, bus }) {
     const el = overlays.get(index);
     const node = el?.querySelector('.mlpp-ripple');
     if (!node || !shown.includes(index)) return;
-    const travel = Math.round(RIPPLE_TRAVEL * (0.6 + strength * 0.4));
+    // 선은 제자리에 두고 밝기만 움직인다. 세기는 최고 불투명도로 나타낸다.
+    const peak = RIPPLE_OPACITY * (0.6 + strength * 0.4);
     node.animate(
       [
-        { outlineOffset: '0px', opacity: RIPPLE_OPACITY, offset: 0 },
-        { outlineOffset: `${Math.round(travel * 0.5)}px`, opacity: RIPPLE_OPACITY * 0.7, offset: 0.5 },
-        { outlineOffset: `${travel}px`, opacity: 0, offset: 1 },
+        { opacity: peak, offset: 0 },
+        { opacity: peak * 0.7, offset: 0.5 },
+        { opacity: 0, offset: 1 },
       ],
       { duration: RIPPLE_DURATION_MS, easing: 'cubic-bezier(0.15, 0.7, 0.3, 1)' },
     );

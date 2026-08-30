@@ -1,6 +1,6 @@
 # mullive-plusplus STATUS
 
-현재 버전: `v0.16.1` / GitHub: `tiamatiramisu/mullive-plusplus` / Greasy Fork: [593484](https://greasyfork.org/ko/scripts/593484)
+현재 버전: `v0.16.2` / GitHub: `tiamatiramisu/mullive-plusplus` / Greasy Fork: [593484](https://greasyfork.org/ko/scripts/593484)
 
 ## 스테이지
 
@@ -590,3 +590,8 @@ opacity 가 0.358 로 내려가는 것을 확인.
 
 이동 거리 38px → 15px(2/5), 지속 900ms → 1300ms.
 겉보기 속도는 원래의 약 27%가 된다.
+
+### 2026-08-30 — 파동을 제자리에 고정
+
+선이 밖으로 이동하지 않고 테두리에 붙어 밝기만 오르내리게 바꿨다.
+주기(1.5초)와 지속(1300ms)은 그대로다. 세기는 이동 거리 대신 최고 불투명도로 나타낸다.
