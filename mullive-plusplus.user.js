@@ -4,7 +4,7 @@
 // @name:en      Mul.Live Multiview Enhancer
 // @name:ja-JP   Mul.Live マルチビュー強化
 // @namespace    http://tampermonkey.net/
-// @version      0.22.0
+// @version      0.23.0
 // @license      MIT
 // @description       Resizable chat panel, background-persistent chats, smarter video grid layout and drag-to-swap tiles for Mul.Live.
 // @description:en    Resizable chat panel, background-persistent chats, smarter video grid layout and drag-to-swap tiles for Mul.Live.
@@ -275,7 +275,7 @@
       help: "0이면 무제한. 넘으면 오래 안 본 것부터 렌더를 멈춘다. 연결은 유지되므로 다시 열면 즉시 보인다."
     }
   ];
-  var HIDDEN_DEFAULTS = { chatWidth: 350 };
+  var HIDDEN_DEFAULTS = { chatWidth: 350, panelSeen: 0 };
   var DEFAULTS = { ...Object.fromEntries(SCHEMA.map((f) => [f.key, f.value])), ...HIDDEN_DEFAULTS };
   var memory = /* @__PURE__ */ new Map();
   var listeners = /* @__PURE__ */ new Set();
@@ -443,13 +443,55 @@
     };
   }
 
+  // src/toast.js
+  var Z = 2147483e3;
+  var LIFE_MS = 900;
+  var OFFSET = 6;
+  var BASE_CSS = `
+.mlpp-toast {
+  position: fixed !important;
+  z-index: ${Z} !important;
+  padding: 3px 8px !important;
+  border-radius: 6px !important;
+  border: 1px solid rgba(255, 255, 255, 0.14) !important;
+  background-color: rgba(20, 21, 23, 0.9) !important;
+  color: #f2f4f8 !important;
+  font-size: 15px !important;
+  line-height: 1.25 !important;
+  white-space: nowrap !important;
+  pointer-events: none !important;
+  opacity: 0;
+}
+`;
+  function showToast(text, x, y) {
+    setStyle("toast", BASE_CSS);
+    const el = document.createElement("div");
+    el.className = "mlpp-toast";
+    el.textContent = text;
+    document.body.append(el);
+    const w = el.offsetWidth;
+    const h = el.offsetHeight;
+    el.style.left = `${Math.max(4, Math.min(window.innerWidth - w - 4, x - w - OFFSET))}px`;
+    el.style.top = `${Math.max(4, Math.min(window.innerHeight - h - 4, y - h - OFFSET))}px`;
+    el.animate(
+      [
+        { opacity: 0, transform: "translateY(5px)" },
+        { opacity: 1, transform: "translateY(0)", offset: 0.15 },
+        { opacity: 1, transform: "translateY(0)", offset: 0.6 },
+        { opacity: 0, transform: "translateY(-5px)" }
+      ],
+      { duration: LIFE_MS, easing: "ease-out" }
+    );
+    setTimeout(() => el.remove(), LIFE_MS + 100);
+  }
+
   // src/audio.js
   var SOLO_COLOR = "rgb(96, 155, 255)";
   var RIPPLE_OPACITY = 0.6;
   var RIPPLE_DURATION_MS = 1300;
   var PULSE_PERIOD_MS = 1500;
   var PULSE_STAGGER_MS = 170;
-  var BASE_CSS = `
+  var BASE_CSS2 = `
 #mlpp-glow {
   position: absolute !important;
   inset: 0 !important;
@@ -556,7 +598,7 @@
           bus.send(index, { kind: "mute", muted });
         }
       });
-      const rules = [BASE_CSS];
+      const rules = [BASE_CSS2];
       const next = [];
       for (const [index, r] of rects) {
         const el = ensureOverlay(index);
@@ -598,12 +640,18 @@
           else if (hovered === index) hovered = -1;
           apply();
           break;
-        case "toggle":
-          if (pinned.has(index)) pinned.delete(index);
-          else pinned.add(index);
+        case "toggle": {
+          const added = !pinned.has(index);
+          if (added) pinned.add(index);
+          else pinned.delete(index);
           if (masterAutoPinned === index) masterAutoPinned = -1;
+          const rect = rects.get(index);
+          if (rect) {
+            showToast(added ? "➕S" : "➖S", rect.x + Number(data.x ?? rect.w / 2), rect.y + Number(data.y ?? rect.h / 2));
+          }
           apply();
           break;
+        }
       }
     });
     onChange(() => {
@@ -877,7 +925,7 @@
 
   // src/dnd.js
   var MODIFIER_HINT = "Alt(Option)을 누른 채 끌어서 위치 교환";
-  var BASE_CSS2 = `
+  var BASE_CSS3 = `
 .mlpp-tile {
   position: absolute !important;
   z-index: 7 !important;
@@ -944,7 +992,7 @@ html.mlpp-swap .mlpp-tile:hover { border-color: #7aa2f7 !important; }
       return rects.findIndex((r) => x >= r.x && x < r.x + r.w && y >= r.y && y < r.y + r.h);
     }
     function paint() {
-      const rules = [BASE_CSS2];
+      const rules = [BASE_CSS3];
       rects.forEach((r, slot) => {
         const el = ensureOverlay(slot);
         const label = el.querySelector(".mlpp-tile-label");
@@ -1035,7 +1083,7 @@ html.mlpp-swap .mlpp-tile:hover { border-color: #7aa2f7 !important; }
   var MIN_COLUMN_WIDTH = 400;
   var TILE_GAP = 0;
   var HOVER_GRACE_MS = 700;
-  var BASE_CSS3 = `
+  var BASE_CSS4 = `
 #streams {
   position: absolute !important;
   inset: 0 !important;
@@ -1080,12 +1128,9 @@ html.mlpp-swap .mlpp-tile:hover { border-color: #7aa2f7 !important; }
   font-size: 14px !important;
   pointer-events: none !important;
 }
-#chat-select {
-  position: absolute !important;
-  z-index: 6 !important;
-  margin: 0 !important;
-  pointer-events: auto !important;
-}
+/* 페이지의 채팅 드롭다운은 감춘다. 우클릭과 설정 패널이 그 일을 대신한다.
+   값은 계속 맞춰 둔다 — 드래그 라벨이 이 select 의 옵션 텍스트를 읽는다. */
+#chat-select { display: none !important; }
 /* 잡는 영역은 세로 전체로 넓게 두되, 보이는 것은 가운데의 짧은 그립뿐이다.
    막대를 세로로 길게 그리면 영상과 채팅 사이에 경계선이 생겨 눈에 거슬린다. */
 #mlpp-resizer {
@@ -1143,6 +1188,10 @@ html.mlpp-swap .mlpp-tile:hover { border-color: #7aa2f7 !important; }
     }
     let master = -1;
     let ignoreHoverUntil = 0;
+    let videoRects = (
+      /** @type {Map<number, import('./geometry.js').Rect>} */
+      /* @__PURE__ */ new Map()
+    );
     let masterChat = -1;
     let masterChatAuto = false;
     let slotStream = (
@@ -1178,28 +1227,36 @@ html.mlpp-swap .mlpp-tile:hover { border-color: #7aa2f7 !important; }
     }
     function switchPane(index) {
       chatVisible = true;
-      if (panes.includes(index)) return;
+      if (panes.includes(index)) return null;
       if (panes[panes.length - 1] === masterChat) masterChat = -1;
       panes = panes.length === 0 ? [index] : [...panes.slice(0, -1), index];
+      return "🔄💬";
+    }
+    function toastAt(index, data, text) {
+      const r = videoRects.get(index);
+      if (!r) return;
+      showToast(text, r.x + (Number(data.x) || r.w / 2), r.y + (Number(data.y) || r.h / 2));
     }
     function togglePane(index) {
       if (index === masterChat) masterChatAuto = false;
       if (!chatVisible) {
         chatVisible = true;
         if (!panes.includes(index)) panes.push(index);
-        return;
+        return "➕💬";
       }
       if (panes.includes(index)) {
         const rest = panes.filter((i) => i !== index);
         if (rest.length === 0) {
           chatVisible = false;
-          return;
+          return "➖💬";
         }
         if (index === masterChat) masterChat = -1;
         panes = rest;
-        return;
+        return "➖💬";
       }
-      if (paneRoom(panes.length + 1)) panes.push(index);
+      if (!paneRoom(panes.length + 1)) return null;
+      panes.push(index);
+      return "➕💬";
     }
     function resetOrder() {
       master = -1;
@@ -1267,7 +1324,7 @@ html.mlpp-swap .mlpp-tile:hover { border-color: #7aa2f7 !important; }
       }
       const current = visible[0] ?? -1;
       const states = chats.sync(visible, get("chatLimit"));
-      const rules = [BASE_CSS3];
+      const rules = [BASE_CSS4];
       layout.videos.forEach((r, slot) => {
         rules.push(place(`#streams iframe:nth-child(${slotStream[slot] + 1})`, r));
       });
@@ -1291,20 +1348,9 @@ html.mlpp-swap .mlpp-tile:hover { border-color: #7aa2f7 !important; }
         const extra = state === "visible" ? "display: block !important; visibility: visible !important;" : "display: block !important; visibility: hidden !important; pointer-events: none !important;";
         rules.push(place(selector, slot, extra));
       }
-      if (columns || !chatVisible) {
-        rules.push("#chat-select { display: none !important; }");
-        rules.push("#mlpp-resizer { display: none !important; }");
-      } else {
-        const panel = layout.chats[0];
-        rules.push("#chat-select { display: block !important; }");
-        if (current >= 0 && hooks.chatSelect.selectedIndex !== current) hooks.chatSelect.selectedIndex = current;
-        if (panel) {
-          const left = panel.x + RESIZER_WIDTH + 2;
-          const w = Math.max(40, panel.w - RESIZER_WIDTH - 6);
-          rules.push(`#chat-select { left: ${left}px !important; top: 4px !important; width: ${w}px !important; }`);
-        }
-        if (layout.resizer) rules.push(place("#mlpp-resizer", layout.resizer, "display: block !important;"));
-      }
+      if (current >= 0 && hooks.chatSelect.selectedIndex !== current) hooks.chatSelect.selectedIndex = current;
+      if (columns || !chatVisible) rules.push("#mlpp-resizer { display: none !important; }");
+      else if (layout.resizer) rules.push(place("#mlpp-resizer", layout.resizer, "display: block !important;"));
       rules.push(`#chat-toggle .open { display: ${chatVisible ? "none" : "inline"} !important; }`);
       rules.push(`#chat-toggle .close { display: ${chatVisible ? "inline" : "none"} !important; }`);
       setStyle("layout", rules.join("\n"));
@@ -1312,6 +1358,7 @@ html.mlpp-swap .mlpp-tile:hover { border-color: #7aa2f7 !important; }
       dnd.update(layout.videos);
       const byStream = /* @__PURE__ */ new Map();
       layout.videos.forEach((r, slot) => byStream.set(slotStream[slot], r));
+      videoRects = byStream;
       audio.update(byStream);
     }
     function schedule() {
@@ -1410,8 +1457,8 @@ html.mlpp-swap .mlpp-tile:hover { border-color: #7aa2f7 !important; }
         schedule();
       } else if (data.kind === "commit") {
         preview = -1;
-        if (data.shift) togglePane(index);
-        else switchPane(index);
+        const done = data.shift ? togglePane(index) : switchPane(index);
+        if (done) toastAt(index, data, done);
         schedule();
       }
     });
@@ -1423,13 +1470,13 @@ html.mlpp-swap .mlpp-tile:hover { border-color: #7aa2f7 !important; }
   }
 
   // src/panel.js
-  var Z = 2147483e3;
-  var BASE_CSS4 = `
+  var Z2 = 2147483e3;
+  var BASE_CSS5 = `
 #mlpp-gear {
   position: fixed !important;
   top: 0 !important;
   right: 34px !important;
-  z-index: ${Z} !important;
+  z-index: ${Z2} !important;
   width: 28px !important;
   height: 28px !important;
   padding: 0 !important;
@@ -1445,11 +1492,21 @@ html.mlpp-swap .mlpp-tile:hover { border-color: #7aa2f7 !important; }
   transition: opacity 120ms ease-in-out, background-color 120ms ease-in-out !important;
 }
 #mlpp-gear:hover, #mlpp-gear.mlpp-open { opacity: 1 !important; background-color: #444 !important; }
+/* 처음 오는 사람에게만. 기본 규칙이 opacity를 !important로 잡고 있어 애니메이션으로는 못 이긴다.
+   특정도가 한 단계 높은 이 규칙으로 고정해 두고, 애니메이션은 base에 없는 box-shadow만 건드린다. */
+#mlpp-gear.mlpp-attract {
+  opacity: 1 !important;
+  animation: mlpp-attract 1.7s ease-in-out infinite !important;
+}
+@keyframes mlpp-attract {
+  0%, 100% { box-shadow: 0 0 0 0 rgba(76, 141, 255, 0); }
+  50% { box-shadow: 0 0 14px 3px rgba(76, 141, 255, 0.55); }
+}
 #mlpp-panel {
   position: fixed !important;
   top: 30px !important;
   right: 8px !important;
-  z-index: ${Z} !important;
+  z-index: ${Z2} !important;
   display: none !important;
   box-sizing: border-box !important;
   width: 340px !important;
@@ -1581,12 +1638,13 @@ html.mlpp-swap .mlpp-tile:hover { border-color: #7aa2f7 !important; }
 #mlpp-panel .mlpp-actions button:hover { background-color: #34363b !important; }
 `;
   function createSettingsPanel(actions) {
-    setStyle("panel", BASE_CSS4);
+    setStyle("panel", BASE_CSS5);
     const gear = document.createElement("button");
     gear.id = "mlpp-gear";
     gear.type = "button";
     gear.textContent = "⚙";
     gear.title = "Mul.Live++ 관리 패널";
+    if (get("panelSeen") === 0) gear.classList.add("mlpp-attract");
     const panel = document.createElement("div");
     panel.id = "mlpp-panel";
     const title = document.createElement("h2");
@@ -1743,6 +1801,8 @@ html.mlpp-swap .mlpp-tile:hover { border-color: #7aa2f7 !important; }
       sync();
       panel.classList.add("mlpp-open");
       gear.classList.add("mlpp-open");
+      gear.classList.remove("mlpp-attract");
+      if (get("panelSeen") === 0) set("panelSeen", 1);
     }
     function close() {
       panel.classList.remove("mlpp-open");
@@ -1926,7 +1986,7 @@ html.mlpp-swap .mlpp-tile:hover { border-color: #7aa2f7 !important; }
         if (!parentOrigin || !inCenter(e)) return;
         e.stopPropagation();
         e.preventDefault();
-        report({ kind: "toggle" });
+        report({ kind: "toggle", x: e.clientX, y: e.clientY });
       },
       true
     );
@@ -1936,7 +1996,7 @@ html.mlpp-swap .mlpp-tile:hover { border-color: #7aa2f7 !important; }
         if (!parentOrigin || !inCenter(e)) return;
         e.stopPropagation();
         e.preventDefault();
-        report({ kind: "commit", shift: e.shiftKey });
+        report({ kind: "commit", shift: e.shiftKey, x: e.clientX, y: e.clientY });
       },
       true
     );
