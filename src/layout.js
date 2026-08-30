@@ -16,6 +16,10 @@ const RESIZER_WIDTH = 6;
 const SELECT_HEIGHT = 28;
 const MIN_CHAT_WIDTH = 240;
 const DEFAULT_CHAT_WIDTH = 350;
+/** 열 모드로 갈지 정하는 기준. 열 하나의 폭이 곧 영상 폭이자 채팅 폭이다. */
+const MIN_COLUMN_WIDTH = 400;
+/** 타일 사이 여백. 붙여 놓는 편이 낫다고 판단해 고정한다. */
+const TILE_GAP = 0;
 
 const BASE_CSS = `
 #streams {
@@ -170,7 +174,7 @@ export function startLayout(hooks, chatsRoot, chats, audio, bus) {
     const W = window.innerWidth;
     const H = window.innerHeight;
     const n = hooks.players.length;
-    const gap = settings.get('tileGap');
+    const gap = TILE_GAP;
     const mode = settings.layoutMode();
     const cw = chatWidth();
 
@@ -180,7 +184,7 @@ export function startLayout(hooks, chatsRoot, chats, audio, bus) {
     let layout = null;
     // 수동 격자를 지정하면 영상이 여러 행에 놓이므로 "영상 아래 자기 채팅"이 성립하지 않는다. 사이드로 간다.
     if (chatVisible && forceCols <= 0 && mode !== 'side') {
-      layout = columnLayout(n, W, H, gap, settings.get('minColumnWidth'), mode === 'columns');
+      layout = columnLayout(n, W, H, gap, MIN_COLUMN_WIDTH, mode === 'columns');
     }
     if (!layout) {
       layout = sideLayout(n, W, H, gap, cw, RESIZER_WIDTH, chatVisible, forceCols, forceRows);

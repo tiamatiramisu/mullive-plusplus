@@ -36,19 +36,6 @@ export const SCHEMA = [
     help: '자동: 가로 화면이고 열 폭이 충분하면 열 모드, 아니면 사이드.',
   },
   {
-    key: 'minColumnWidth',
-    name: '열 모드 최소 열 폭',
-    tab: '레이아웃',
-    type: 'int',
-    value: 400,
-    min: 240,
-    max: 1200,
-    unit: 'px',
-    help: '열 하나의 폭이 곧 영상 폭이자 채팅 폭이다. 이보다 좁아지면 사이드로 내려간다.',
-  },
-  { key: 'chatWidth', name: '사이드 채팅 폭', tab: '레이아웃', type: 'int', value: 350, min: 240, max: 1600, unit: 'px', help: '리사이저를 끌어도 바뀐다.' },
-  { key: 'tileGap', name: '타일 간격', tab: '레이아웃', type: 'int', value: 0, min: 0, max: 40, unit: 'px' },
-  {
     key: 'gridCols',
     name: '수동 격자 — 열 수',
     tab: '레이아웃',
@@ -82,7 +69,15 @@ export const SCHEMA = [
   },
 ];
 
-const DEFAULTS = Object.fromEntries(SCHEMA.map((f) => [f.key, f.value]));
+/**
+ * 패널에 노출하지 않지만 저장은 되는 값.
+ * 사이드 채팅 폭은 리사이저 핸들로 조절하므로 숫자 입력칸이 따로 필요 없다.
+ */
+/** @type {Record<string, number>} */
+const HIDDEN_DEFAULTS = { chatWidth: 350 };
+
+/** @type {Record<string, number>} */
+const DEFAULTS = { ...Object.fromEntries(SCHEMA.map((f) => [f.key, f.value])), ...HIDDEN_DEFAULTS };
 
 /** @type {Map<string, number>} */
 const memory = new Map();
@@ -127,9 +122,9 @@ export function set(key, value) {
   listeners.forEach((fn) => fn());
 }
 
-/** 전부 기본값으로 되돌린다. */
+/** 전부 기본값으로 되돌린다. 패널에 없는 값(채팅 폭)도 함께 되돌린다. */
 export function resetAll() {
-  for (const field of SCHEMA) set(field.key, field.value);
+  for (const [key, value] of Object.entries(DEFAULTS)) set(key, value);
 }
 
 /** @type {Map<string, number[]>} */
