@@ -4,7 +4,7 @@
 // @name:en      Mul.Live Multiview Enhancer
 // @name:ja-JP   Mul.Live マルチビュー強化
 // @namespace    http://tampermonkey.net/
-// @version      0.13.0
+// @version      0.14.0
 // @license      MIT
 // @description       Resizable chat panel, background-persistent chats, smarter video grid layout and drag-to-swap tiles for Mul.Live.
 // @description:en    Resizable chat panel, background-persistent chats, smarter video grid layout and drag-to-swap tiles for Mul.Live.
@@ -406,6 +406,8 @@
   // src/audio.js
   var SOLO_GLOW = "rgba(76, 141, 255, 0.5)";
   var MUTED_GLOW = "rgba(255, 77, 77, 0.45)";
+  var PULSE_PERIOD_MS = 1500;
+  var PULSE_STAGGER_MS = 170;
   var BASE_CSS = `
 #mlpp-glow {
   position: absolute !important;
@@ -424,11 +426,13 @@
   pointer-events: none !important;
   box-shadow: 0 0 14px 3px var(--mlpp-glow, transparent) !important;
 }
-/* 파형처럼 천천히 일렁인다. CSS 애니메이션이라 프레임마다 드는 비용이 없다. */
-.mlpp-audio.mlpp-wave { animation: mlpp-wave 2.4s ease-in-out infinite !important; }
-@keyframes mlpp-wave {
-  0%, 100% { box-shadow: 0 0 10px 2px var(--mlpp-glow); }
-  50% { box-shadow: 0 0 30px 7px var(--mlpp-glow); }
+/* 파동은 별도 자식이 맡는다. 바탕 글로우와 box-shadow 가 서로 덮어쓰지 않게 하려는 것이다.
+   peak 순간마다 한 발씩 쏘고, 애니메이션이 끝나면 사라진다. */
+.mlpp-ripple {
+  position: absolute !important;
+  inset: 0 !important;
+  opacity: 0 !important;
+  pointer-events: none !important;
 }
 `;
   function createAudioMixer({ players, root, bus }) {
@@ -438,7 +442,9 @@
     const overlays = /* @__PURE__ */ new Map();
     const sent = /* @__PURE__ */ new Map();
     const agents = /* @__PURE__ */ new Set();
-    const levels = /* @__PURE__ */ new Map();
+    const colors = /* @__PURE__ */ new Map();
+    let shown = [];
+    let pulseTimer = 0;
     function active() {
       const set2 = new Set(pinned);
       if (hovered >= 0) set2.add(hovered);
@@ -450,19 +456,36 @@
       const el = document.createElement("div");
       el.id = `mlpp-audio-${index}`;
       el.className = "mlpp-audio";
+      const ripple2 = document.createElement("div");
+      ripple2.className = "mlpp-ripple";
+      el.append(ripple2);
       root.append(el);
       overlays.set(index, el);
       return el;
     }
-    function applyLevel(index) {
+    function ripple(index, strength) {
       const el = overlays.get(index);
-      if (!el) return;
-      const level = levels.get(index) ?? 0;
-      el.style.setProperty(
-        "box-shadow",
-        `0 0 ${Math.round(10 + level * 30)}px ${Math.round(2 + level * 7)}px var(--mlpp-glow)`,
-        "important"
+      const node = el?.querySelector(".mlpp-ripple");
+      const color = colors.get(index);
+      if (!node || !color || !shown.includes(index)) return;
+      const spread = Math.round(10 + strength * 22);
+      node.animate(
+        [
+          { boxShadow: `0 0 1px 0px ${color}`, opacity: 0.95 },
+          { boxShadow: `0 0 6px ${spread}px ${color}`, opacity: 0 }
+        ],
+        { duration: 620, easing: "cubic-bezier(0.2, 0.65, 0.3, 1)" }
       );
+    }
+    function retimePulses() {
+      if (pulseTimer) {
+        clearInterval(pulseTimer);
+        pulseTimer = 0;
+      }
+      if (get("glowPulse") === 0 || get("glowFromAudio") !== 0) return;
+      pulseTimer = setInterval(() => {
+        shown.forEach((index, i) => setTimeout(() => ripple(index, 0.55), i * PULSE_STAGGER_MS));
+      }, PULSE_PERIOD_MS);
     }
     function syncAnalysers() {
       const on = get("glowFromAudio") !== 0;
@@ -471,7 +494,6 @@
     function apply() {
       const set2 = active();
       const soloing = set2.size > 0;
-      const wave = get("glowPulse") !== 0;
       const fromAudio = get("glowFromAudio") !== 0;
       players.forEach((_, index) => {
         const muted = soloing && !set2.has(index);
@@ -482,6 +504,7 @@
       });
       const hoveredKind = hovered < 0 ? null : set2.has(hovered) ? "solo" : "muted";
       const rules = [BASE_CSS];
+      const next = [];
       for (const [index, r] of rects) {
         const el = ensureOverlay(index);
         const kind = set2.has(index) ? "solo" : "muted";
@@ -490,13 +513,13 @@
           continue;
         }
         const glow = kind === "solo" ? SOLO_GLOW : MUTED_GLOW;
+        colors.set(index, glow);
+        next.push(index);
         rules.push(
-          `#${el.id} { display: block !important; left: ${r.x}px !important; top: ${r.y}px !important; width: ${r.w}px !important; height: ${r.h}px !important; --mlpp-glow: ${glow} !important; animation-delay: -${(index * 0.43).toFixed(2)}s !important; }`
+          `#${el.id} { display: block !important; left: ${r.x}px !important; top: ${r.y}px !important; width: ${r.w}px !important; height: ${r.h}px !important; --mlpp-glow: ${glow} !important; }`
         );
-        el.classList.toggle("mlpp-wave", wave && !fromAudio);
-        if (fromAudio) applyLevel(index);
-        else el.style.removeProperty("box-shadow");
       }
+      shown = next;
       setStyle("audio", rules.join("\n"));
       document.documentElement.dataset.mlppAudio = `pinned=[${[...pinned].join(",")}] hovered=${hovered} muted=[${players.map((_, i) => soloing && !set2.has(i) ? i : null).filter((i) => i !== null).join(",")}] agents=[${[...agents].join(",")}]`;
     }
@@ -512,9 +535,8 @@
           bus.send(index, { kind: "analyse", on: get("glowFromAudio") !== 0 });
           apply();
           break;
-        case "level":
-          levels.set(index, Math.max(0, Math.min(1, Number(data.level) || 0)));
-          if (get("glowFromAudio")) applyLevel(index);
+        case "beat":
+          if (get("glowPulse") !== 0) ripple(index, Math.max(0, Math.min(1, Number(data.strength) || 0)));
           break;
         case "hover":
           if (data.on) hovered = index;
@@ -530,8 +552,10 @@
     });
     onChange(() => {
       syncAnalysers();
+      retimePulses();
       apply();
     });
+    retimePulses();
     return {
       /** 플레이어가 준비되면 부른다. 에이전트가 먼저 올라와 있을 수도 있어 양쪽에서 인사한다. */
       greet(index) {
@@ -1490,20 +1514,28 @@ html.mlpp-swap .mlpp-tile:hover { border-color: #7aa2f7 !important; }
     const videos = [...document.querySelectorAll("video")];
     return videos.find((v) => v.videoWidth > 400) ?? videos[0] ?? null;
   }
+  var AVG_DECAY = 0.9;
+  var PEAK_RATIO = 1.35;
+  var PEAK_FLOOR = 0.06;
+  var REFRACTORY_MS = 140;
+  var avg = 0;
   function measure() {
     if (!analysing) return;
     requestAnimationFrame(measure);
     if (!analyser || !buffer) return;
-    const now = performance.now();
-    if (now - lastSent < 60) return;
-    lastSent = now;
     analyser.getByteTimeDomainData(buffer);
     let peak = 0;
     for (const v of buffer) {
       const d = Math.abs(v - 128);
       if (d > peak) peak = d;
     }
-    report({ kind: "level", level: Math.min(1, peak / 80) });
+    const level = Math.min(1, peak / 80);
+    avg = avg * AVG_DECAY + level * (1 - AVG_DECAY);
+    const now = performance.now();
+    if (level > avg * PEAK_RATIO + PEAK_FLOOR && now - lastSent > REFRACTORY_MS) {
+      lastSent = now;
+      report({ kind: "beat", strength: Math.min(1, (level - avg) / 0.4) });
+    }
   }
   function startAnalyser() {
     if (analysing) return;
@@ -1528,7 +1560,7 @@ html.mlpp-swap .mlpp-tile:hover { border-color: #7aa2f7 !important; }
   }
   function stopAnalyser() {
     analysing = false;
-    report({ kind: "level", level: 0 });
+    avg = 0;
   }
   function startPlayerAgent() {
     if (window.top === window) return;
