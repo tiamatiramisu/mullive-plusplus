@@ -4,7 +4,7 @@
 // @name:en      Mul.Live Multiview Enhancer
 // @name:ja-JP   Mul.Live マルチビュー強化
 // @namespace    http://tampermonkey.net/
-// @version      0.24.0
+// @version      0.24.1
 // @license      MIT
 // @description       Resizable chat panel, background-persistent chats, smarter video grid layout and drag-to-swap tiles for Mul.Live.
 // @description:en    Resizable chat panel, background-persistent chats, smarter video grid layout and drag-to-swap tiles for Mul.Live.
@@ -174,9 +174,17 @@
     ["bottom", "right"]
   );
   var TAB_HINTS = {
-    레이아웃: { label: "마스터 지정", text: "휠클릭으로 한 플레이어를 확대하세요." },
-    채팅: { label: "채팅 전환", text: "플레이어에 우클릭하세요. Shift+우클릭이면 채팅창을 쪼개 칸을 넣고 뺍니다." },
-    사운드: { label: "솔로 지정", text: "플레이어에 좌클릭해서 듣고 싶은 영상들을 지정할 수 있어요." }
+    레이아웃: [{ label: "마스터 지정", text: "휠클릭으로 한 플레이어를 확대하세요." }],
+    채팅: [
+      { label: "채팅 전환", text: "플레이어에 우클릭하세요." },
+      { label: "채팅 추가/제거", text: "플레이어에 Shift+우클릭해서 채팅창을 추가할 수 있어요." },
+      {
+        label: "드래그&드롭",
+        text: "우클릭 드래그로도 채팅을 조작할 수 있어요. Shift+우클릭으로 채팅을 제거하세요.",
+        rule: true
+      }
+    ],
+    사운드: [{ label: "솔로 지정", text: "플레이어에 좌클릭해서 듣고 싶은 영상들을 지정할 수 있어요." }]
   };
   var GROUP_HELP = {
     "수동 격자": "0이면 자동. 지정하면 열 모드는 적용되지 않고 사이드 채팅이 된다. 행이 방송 수보다 많으면 빈 칸이 남는다."
@@ -1931,6 +1939,12 @@ html.mlpp-swap .mlpp-tile:hover { border-color: rgba(255, 255, 255, 0.7) !import
 #mlpp-panel .mlpp-tab-body { display: none !important; }
 #mlpp-panel .mlpp-tab-body.mlpp-active { display: block !important; }
 #mlpp-panel .mlpp-hint b { color: #dfe3ea !important; font-weight: 700 !important; }
+#mlpp-panel .mlpp-hint-line + .mlpp-hint-line { margin-top: 5px !important; }
+#mlpp-panel .mlpp-hint-line.mlpp-rule {
+  margin-top: 9px !important;
+  padding-top: 9px !important;
+  border-top: 1px solid rgba(255, 255, 255, 0.12) !important;
+}
 #mlpp-panel .mlpp-hint {
   margin: 0 0 14px !important;
   padding: 8px 10px !important;
@@ -2048,14 +2062,19 @@ html.mlpp-swap .mlpp-tile:hover { border-color: rgba(255, 255, 255, 0.7) !import
       tabButtons.set(name, button);
       const body = document.createElement("div");
       body.className = "mlpp-tab-body";
-      const hint = TAB_HINTS[name];
-      if (hint) {
-        const line = document.createElement("div");
-        line.className = "mlpp-hint";
-        const label = document.createElement("b");
-        label.textContent = `${hint.label}: `;
-        line.append(label, hint.text);
-        body.append(line);
+      const hints = TAB_HINTS[name] ?? [];
+      if (hints.length > 0) {
+        const box = document.createElement("div");
+        box.className = "mlpp-hint";
+        for (const hint of hints) {
+          const line = document.createElement("div");
+          line.className = hint.rule ? "mlpp-hint-line mlpp-rule" : "mlpp-hint-line";
+          const label = document.createElement("b");
+          label.textContent = `${hint.label}: `;
+          line.append(label, hint.text);
+          box.append(line);
+        }
+        body.append(box);
       }
       bodies.set(name, body);
     }
