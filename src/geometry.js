@@ -14,7 +14,7 @@ const MIN_CHAT_HEIGHT = 160;
 
 /**
  * @typedef {object} Layout
- * @property {'columns' | 'side'} mode
+ * @property {'columns' | 'side' | 'master'} mode
  * @property {Rect[]} videos            스트림 순서대로
  * @property {Rect[]} chats             columns: 스트림마다 하나. side: 활성 채팅 자리 하나(숨김이면 빈 배열)
  * @property {Rect | null} resizer
@@ -142,6 +142,69 @@ export function sideLayout(n, W, H, gap, chatWidth, resizerWidth, chatVisible, f
 
   return {
     mode: 'side',
+    videos,
+    chats: chatVisible ? [{ x: W - chatWidth, y: 0, w: chatWidth, h: H }] : [],
+    resizer: chatVisible ? { x: W - chatWidth, y: 0, w: resizerWidth, h: H } : null,
+  };
+}
+
+/** 스택 열이 가져갈 가용 폭의 비율 */
+const STACK_RATIO = 0.25;
+const MIN_STACK_WIDTH = 160;
+
+/**
+ * 마스터 앤 스택. 큰 화면 하나를 왼쪽에 두고 나머지를 오른쪽에 세로로 쌓는다.
+ * 사이드 모드의 변형이므로 채팅은 그대로 오른쪽 패널 하나다.
+ *
+ * @param {number} n
+ * @param {number} W
+ * @param {number} H
+ * @param {number} gap
+ * @param {number} chatWidth
+ * @param {number} resizerWidth
+ * @param {boolean} chatVisible
+ * @returns {Layout | null}
+ */
+export function masterStackLayout(n, W, H, gap, chatWidth, resizerWidth, chatVisible) {
+  if (n < 2) return null;
+  const availW = W - (chatVisible ? chatWidth : 0);
+  const slaves = n - 1;
+  if (availW <= 0 || H <= 0) return null;
+
+  // 스택은 세로로 쌓이므로 화면 높이가 폭의 상한을 정한다.
+  const maxByHeight = Math.floor(((H - gap * (slaves - 1)) / slaves) * ASPECT);
+  let stackW = Math.min(Math.floor(availW * STACK_RATIO), maxByHeight);
+  if (stackW < MIN_STACK_WIDTH) stackW = Math.min(MIN_STACK_WIDTH, maxByHeight);
+  if (stackW <= 0) return null;
+
+  const slaveH = Math.floor(stackW / ASPECT);
+  let masterW = availW - stackW - gap;
+  let masterH = Math.floor(masterW / ASPECT);
+  if (masterH > H) {
+    masterH = H;
+    masterW = Math.floor(masterH * ASPECT);
+  }
+  if (masterW <= 0 || masterH <= 0 || slaveH <= 0) return null;
+
+  const stackX = availW - stackW;
+  const stackTotal = slaves * slaveH + gap * (slaves - 1);
+  const stackY = Math.floor((H - stackTotal) / 2);
+
+  /** @type {Rect[]} */
+  const videos = [
+    {
+      x: Math.max(0, Math.floor((stackX - gap - masterW) / 2)),
+      y: Math.floor((H - masterH) / 2),
+      w: masterW,
+      h: masterH,
+    },
+  ];
+  for (let i = 0; i < slaves; i++) {
+    videos.push({ x: stackX, y: stackY + i * (slaveH + gap), w: stackW, h: slaveH });
+  }
+
+  return {
+    mode: 'master',
     videos,
     chats: chatVisible ? [{ x: W - chatWidth, y: 0, w: chatWidth, h: H }] : [],
     resizer: chatVisible ? { x: W - chatWidth, y: 0, w: resizerWidth, h: H } : null,

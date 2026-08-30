@@ -1,6 +1,6 @@
 import { setStyle } from './style.js';
 import * as settings from './settings.js';
-import { columnLayout, sideLayout } from './geometry.js';
+import { columnLayout, masterStackLayout, sideLayout } from './geometry.js';
 import { createDragSwap } from './dnd.js';
 
 /**
@@ -132,6 +132,11 @@ export function startLayout(hooks, chatsRoot, chats, audio, bus) {
   let preview = -1;
   const activeChat = () => (preview >= 0 ? preview : committed);
 
+  // 마스터 앤 스택의 마스터 방송. -1이면 평범한 격자. 새로고침하면 풀린다.
+  let master = -1;
+  /** 이번 렌더에서 슬롯마다 어떤 방송이 놓였는지. 마스터 모드에서는 order와 달라진다. */
+  let slotStream = /** @type {number[]} */ ([]);
+
   // 슬롯(화면상의 자리) → 스트림(방송) 대응. 드래그 교환으로만 바뀐다.
   // iframe을 옮기지 않고 이 대응만 바꾸므로 교환해도 재생이 끊기지 않는다.
   const orderKey = `order:${location.pathname}`;
@@ -139,9 +144,13 @@ export function startLayout(hooks, chatsRoot, chats, audio, bus) {
 
   const dnd = createDragSwap({
     root: chatsRoot,
-    labelOf: (slot) => hooks.chatSelect.options[order[slot]]?.textContent ?? '',
+    labelOf: (slot) => hooks.chatSelect.options[slotStream[slot]]?.textContent ?? '',
     swap: (a, b) => {
-      [order[a], order[b]] = [order[b], order[a]];
+      // 슬롯이 아니라 방송 기준으로 맞바꾼다. 마스터 모드에서는 슬롯과 order 순서가 다르다.
+      const ia = order.indexOf(slotStream[a]);
+      const ib = order.indexOf(slotStream[b]);
+      if (ia < 0 || ib < 0) return;
+      [order[ia], order[ib]] = [order[ib], order[ia]];
       settings.saveOrder(orderKey, order);
     },
     schedule: () => schedule(),
@@ -149,6 +158,7 @@ export function startLayout(hooks, chatsRoot, chats, audio, bus) {
 
   /** 드래그 교환 순서를 기본으로 되돌린다. */
   function resetOrder() {
+    master = -1;
     order = hooks.players.map((_, i) => i);
     settings.saveOrder(orderKey, order);
     schedule();
@@ -186,9 +196,17 @@ export function startLayout(hooks, chatsRoot, chats, audio, bus) {
     if (chatVisible && forceCols <= 0 && mode !== 'side') {
       layout = columnLayout(n, W, H, gap, MIN_COLUMN_WIDTH, mode === 'columns');
     }
+    // 마스터 앤 스택은 사이드 모드의 변형이다. 열 모드가 잡히면 그쪽이 우선한다.
+    if (!layout && master >= 0 && forceCols <= 0) {
+      layout = masterStackLayout(n, W, H, gap, cw, RESIZER_WIDTH, chatVisible);
+    }
     if (!layout) {
       layout = sideLayout(n, W, H, gap, cw, RESIZER_WIDTH, chatVisible, forceCols, forceRows);
     }
+
+    // 마스터 모드에서는 첫 자리가 마스터다. 나머지는 원래 순서대로 스택에 쌓인다.
+    slotStream =
+      layout.mode === 'master' ? [master, ...order.filter((stream) => stream !== master)] : order;
 
     const columns = layout.mode === 'columns';
     // 안 보이는 채팅도 크기를 유지해야 뒤에서 계속 내려간다. 사이드 패널 자리를 빌려 쓴다.
@@ -202,7 +220,7 @@ export function startLayout(hooks, chatsRoot, chats, audio, bus) {
     const slots = new Map();
     if (columns) {
       layout.chats.forEach((r, slot) => {
-        const stream = order[slot];
+        const stream = slotStream[slot];
         if (visible.includes(stream)) slots.set(stream, r);
       });
     } else if (visible.length > 0 && layout.chats[0]) {
@@ -215,7 +233,7 @@ export function startLayout(hooks, chatsRoot, chats, audio, bus) {
 
     // 슬롯 순서대로 좌표를 나눠준다. DOM 순서(=방송 순서)와 화면 자리는 별개다.
     layout.videos.forEach((r, slot) => {
-      rules.push(place(`#streams iframe:nth-child(${order[slot] + 1})`, r));
+      rules.push(place(`#streams iframe:nth-child(${slotStream[slot] + 1})`, r));
     });
 
     // 채팅 페이지는 무거워서 로딩이 길다. 그동안 검은 화면만 보이면 고장인지 로딩인지 알 수 없다.
@@ -266,12 +284,17 @@ export function startLayout(hooks, chatsRoot, chats, audio, bus) {
     rules.push(`#chat-toggle .close { display: ${chatVisible ? 'inline' : 'none'} !important; }`);
 
     setStyle('layout', rules.join('\n'));
+    // 어떤 배치가 왜 잡혔는지 밖에서 읽을 수 있게 남긴다.
+    // 설정끼리 서로를 죽이는 상황(수동 격자가 열 모드를 끄는 등)을 눈으로 확인하기 어렵다.
+    document.documentElement.dataset.mlppLayout =
+      `mode=${layout.mode} master=${master} chat=${current}` +
+      ` slots=[${slotStream.join(',')}] grid=${forceCols}x${forceRows} setting=${mode}`;
     dnd.update(layout.videos);
 
     // 오디오 오버레이는 슬롯이 아니라 방송 기준이다. 드래그로 자리가 바뀌어도 따라간다.
     /** @type {Map<number, import('./geometry.js').Rect>} */
     const byStream = new Map();
-    layout.videos.forEach((r, slot) => byStream.set(order[slot], r));
+    layout.videos.forEach((r, slot) => byStream.set(slotStream[slot], r));
     audio.update(byStream);
   }
 
@@ -365,6 +388,14 @@ export function startLayout(hooks, chatsRoot, chats, audio, bus) {
   // 사이드 모드에서 영상에 호버하면 그 방송 채팅을 잠깐 보여주고, 우클릭하면 진짜로 넘어간다.
   // 열 모드는 채팅이 전부 보이므로 해당 없다.
   bus.on((index, data) => {
+    // 마스터 앤 스택은 영상 배치라 그 방송의 채팅을 쓸 수 있는지와 무관하다. 가드보다 앞에 둔다.
+    if (data.kind === 'master') {
+      // 마스터를 다시 누르면 해제, 다른 화면을 누르면 그쪽이 마스터가 된다.
+      master = master === index ? -1 : index;
+      schedule();
+      return;
+    }
+    // 아래는 사이드 채팅 전환이라 채팅이 있는 방송에만 해당한다.
     if (!chats.usable.includes(index)) return;
     if (data.kind === 'hover') {
       if (data.on) preview = index;

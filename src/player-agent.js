@@ -118,6 +118,27 @@ export function startPlayerAgent() {
     true,
   );
 
+  // 휠클릭은 마스터 앤 스택 배치를 조작한다. mousedown 을 막지 않으면 자동 스크롤이 뜬다.
+  window.addEventListener(
+    'mousedown',
+    (e) => {
+      if (e.button !== 1 || !parentOrigin || !inCenter(e)) return;
+      e.stopPropagation();
+      e.preventDefault();
+    },
+    true,
+  );
+  window.addEventListener(
+    'auxclick',
+    (e) => {
+      if (e.button !== 1 || !parentOrigin || !inCenter(e)) return;
+      e.stopPropagation();
+      e.preventDefault();
+      report({ kind: 'master' });
+    },
+    true,
+  );
+
   // 부모가 우리보다 먼저 준비됐을 수도, 나중일 수도 있다. 양쪽에서 인사한다.
   window.parent.postMessage({ mlpp: true, kind: 'agent' }, '*');
 }
