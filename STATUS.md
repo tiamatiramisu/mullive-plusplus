@@ -1,6 +1,6 @@
 # mullive-plusplus STATUS
 
-현재 버전: `v0.11.0` / GitHub: `tiamatiramisu/mullive-plusplus` / Greasy Fork: [593484](https://greasyfork.org/ko/scripts/593484)
+현재 버전: `v0.12.0` / GitHub: `tiamatiramisu/mullive-plusplus` / Greasy Fork: [593484](https://greasyfork.org/ko/scripts/593484)
 
 ## 스테이지
 
@@ -484,3 +484,15 @@ node로 미리 계산한 값과 일치.
 
 **검증** — 채팅 탭에 `마스터 전환시 채팅도 전환 = 체크됨` 표시.
 실제 휠클릭 후 진단이 `master=3 chat=3` (직전에는 `master=3 chat=0`).
+
+### 2026-08-30 — 열 모드에서도 마스터 앤 스택 진입
+
+마스터 판정을 열 모드 판정보다 앞으로 옮겼다. 이제 지금 배치가 열이든 사이드든
+휠클릭이면 마스터 앤 스택으로 간다. 마스터 앤 스택은 사이드 채팅 배치라
+열 모드에서 들어오면 채팅이 단일 패널로 바뀌고, 해제하면 원래 배치로 되돌아온다.
+채팅 프레임은 그대로 살아 있으므로 오갈 때 리로드가 없다.
+
+수동 격자를 지정한 상태에서는 여전히 그쪽이 우선한다.
+
+**검증** — 자동(열 모드) 복귀 상태에서 `mode=columns master=-1`, 영상 4개 480×270 한 줄,
+채팅 4개 동시 표시를 확인. 휠클릭 자체는 자동화 도구에 중간 버튼 액션이 없어 사용자 확인.

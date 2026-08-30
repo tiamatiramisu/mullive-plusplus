@@ -196,13 +196,15 @@ export function startLayout(hooks, chatsRoot, chats, audio, bus) {
     const forceRows = settings.get('gridRows');
 
     let layout = null;
-    // 수동 격자를 지정하면 영상이 여러 행에 놓이므로 "영상 아래 자기 채팅"이 성립하지 않는다. 사이드로 간다.
-    if (chatVisible && forceCols <= 0 && mode !== 'side') {
-      layout = columnLayout(n, W, H, gap, MIN_COLUMN_WIDTH, mode === 'columns');
-    }
-    // 마스터 앤 스택은 사이드 모드의 변형이다. 열 모드가 잡히면 그쪽이 우선한다.
-    if (!layout && master >= 0 && forceCols <= 0) {
+    // 마스터를 고르면 지금 배치가 열이든 사이드든 마스터 앤 스택으로 간다.
+    // 마스터 앤 스택은 사이드 채팅 배치라, 열 모드에서 들어오면 채팅이 단일 패널로 바뀐다.
+    // 마스터를 다시 눌러 해제하면 원래 배치로 되돌아온다.
+    if (master >= 0 && forceCols <= 0) {
       layout = masterStackLayout(n, W, H, gap, cw, RESIZER_WIDTH, chatVisible);
+    }
+    // 수동 격자를 지정하면 영상이 여러 행에 놓이므로 "영상 아래 자기 채팅"이 성립하지 않는다. 사이드로 간다.
+    if (!layout && chatVisible && forceCols <= 0 && mode !== 'side') {
+      layout = columnLayout(n, W, H, gap, MIN_COLUMN_WIDTH, mode === 'columns');
     }
     if (!layout) {
       layout = sideLayout(n, W, H, gap, cw, RESIZER_WIDTH, chatVisible, forceCols, forceRows);
