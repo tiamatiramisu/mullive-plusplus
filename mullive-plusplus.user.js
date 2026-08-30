@@ -4,7 +4,7 @@
 // @name:en      Mul.Live Multiview Enhancer
 // @name:ja-JP   Mul.Live マルチビュー強化
 // @namespace    http://tampermonkey.net/
-// @version      0.16.0
+// @version      0.16.1
 // @license      MIT
 // @description       Resizable chat panel, background-persistent chats, smarter video grid layout and drag-to-swap tiles for Mul.Live.
 // @description:en    Resizable chat panel, background-persistent chats, smarter video grid layout and drag-to-swap tiles for Mul.Live.
@@ -406,7 +406,8 @@
   // src/audio.js
   var SOLO_COLOR = "rgb(96, 155, 255)";
   var RIPPLE_OPACITY = 0.6;
-  var RIPPLE_TRAVEL = 38;
+  var RIPPLE_TRAVEL = 15;
+  var RIPPLE_DURATION_MS = 1300;
   var PULSE_PERIOD_MS = 1500;
   var PULSE_STAGGER_MS = 170;
   var BASE_CSS = `
@@ -481,7 +482,7 @@
           { outlineOffset: `${Math.round(travel * 0.5)}px`, opacity: RIPPLE_OPACITY * 0.7, offset: 0.5 },
           { outlineOffset: `${travel}px`, opacity: 0, offset: 1 }
         ],
-        { duration: 900, easing: "cubic-bezier(0.15, 0.7, 0.3, 1)" }
+        { duration: RIPPLE_DURATION_MS, easing: "cubic-bezier(0.15, 0.7, 0.3, 1)" }
       );
     }
     function retimePulses() {
