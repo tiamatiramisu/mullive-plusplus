@@ -4,7 +4,7 @@
 // @name:en      Mul.Live Multiview Enhancer
 // @name:ja-JP   Mul.Live マルチビュー強化
 // @namespace    http://tampermonkey.net/
-// @version      0.11.0
+// @version      0.12.0
 // @license      MIT
 // @description       Resizable chat panel, background-persistent chats, smarter video grid layout and drag-to-swap tiles for Mul.Live.
 // @description:en    Resizable chat panel, background-persistent chats, smarter video grid layout and drag-to-swap tiles for Mul.Live.
@@ -936,11 +936,11 @@ html.mlpp-swap .mlpp-tile:hover { border-color: #7aa2f7 !important; }
       const forceCols = get("gridCols");
       const forceRows = get("gridRows");
       let layout = null;
-      if (chatVisible && forceCols <= 0 && mode2 !== "side") {
-        layout = columnLayout(n, W, H, gap, MIN_COLUMN_WIDTH, mode2 === "columns");
-      }
-      if (!layout && master >= 0 && forceCols <= 0) {
+      if (master >= 0 && forceCols <= 0) {
         layout = masterStackLayout(n, W, H, gap, cw, RESIZER_WIDTH, chatVisible);
+      }
+      if (!layout && chatVisible && forceCols <= 0 && mode2 !== "side") {
+        layout = columnLayout(n, W, H, gap, MIN_COLUMN_WIDTH, mode2 === "columns");
       }
       if (!layout) {
         layout = sideLayout(n, W, H, gap, cw, RESIZER_WIDTH, chatVisible, forceCols, forceRows);
