@@ -4,7 +4,7 @@
 // @name:en      Mul.Live Multiview Enhancer
 // @name:ja-JP   Mul.Live マルチビュー強化
 // @namespace    http://tampermonkey.net/
-// @version      0.19.0
+// @version      0.20.0
 // @license      MIT
 // @description       Resizable chat panel, background-persistent chats, smarter video grid layout and drag-to-swap tiles for Mul.Live.
 // @description:en    Resizable chat panel, background-persistent chats, smarter video grid layout and drag-to-swap tiles for Mul.Live.
@@ -171,10 +171,17 @@
     /** @type {const} */
     ["auto", "columns", "side"]
   );
+  var STACK_PLACEMENTS = (
+    /** @type {const} */
+    ["bottom", "right"]
+  );
   var TAB_HINTS = {
-    레이아웃: "휠클릭으로 한 플레이어를 확대하세요",
-    채팅: "플레이어에 우클릭해서 채팅을 전환/추가하세요",
-    사운드: "플레이어에 좌클릭해서 듣고 싶은 영상들을 지정할 수 있어요"
+    레이아웃: { label: "마스터 지정", text: "휠클릭으로 한 플레이어를 확대하세요." },
+    채팅: { label: "채팅 전환", text: "플레이어에 우클릭해서 채팅을 전환/추가하세요." },
+    사운드: { label: "솔로 지정", text: "플레이어에 좌클릭해서 듣고 싶은 영상들을 지정할 수 있어요." }
+  };
+  var GROUP_HELP = {
+    "수동 격자": "0이면 자동. 지정하면 열 모드는 적용되지 않고 사이드 채팅이 된다. 행이 방송 수보다 많으면 빈 칸이 남는다."
   };
   var SCHEMA = [
     {
@@ -186,17 +193,17 @@
       value: 0,
       help: "자동: 가로 화면이고 열 폭이 충분하면 열 모드, 아니면 사이드."
     },
+    { key: "gridCols", name: "열 수", tab: "레이아웃", group: "수동 격자", type: "int", value: 0, min: 0, max: 12 },
+    { key: "gridRows", name: "행 수", tab: "레이아웃", group: "수동 격자", type: "int", value: 0, min: 0, max: 12 },
     {
-      key: "gridCols",
-      name: "수동 격자 — 열 수",
+      key: "masterStackPlacement",
+      name: "마스터 & 스택 모드 배치",
       tab: "레이아웃",
-      type: "int",
+      type: "enum",
+      options: ["스택은 마스터 아래", "스택은 마스터 우측에"],
       value: 0,
-      min: 0,
-      max: 12,
-      help: "0이 아니면 이 열 수로 고정한다. 지정하면 열 모드는 적용되지 않고 사이드 채팅이 된다."
+      help: "휠클릭으로 마스터를 지정했을 때 나머지 방송을 어디에 쌓을지."
     },
-    { key: "gridRows", name: "수동 격자 — 행 수", tab: "레이아웃", type: "int", value: 0, min: 0, max: 12, help: "방송 수에 필요한 행보다 크면 빈 칸이 남는다." },
     {
       key: "chatHoverPreview",
       name: "호버로 미리 확인",
@@ -285,6 +292,9 @@
   }
   function layoutMode() {
     return LAYOUT_MODES[get("layoutMode")] ?? "auto";
+  }
+  function stackPlacement() {
+    return STACK_PLACEMENTS[get("masterStackPlacement")] ?? "bottom";
   }
   function set(key, value) {
     memory.set(key, value);
@@ -745,11 +755,45 @@
   }
   var STACK_RATIO = 0.25;
   var MIN_STACK_WIDTH = 160;
-  function masterStackLayout(n, W, H, gap, chatWidth, resizerWidth, chatVisible) {
+  function masterStackLayout(n, W, H, gap, chatWidth, resizerWidth, chatVisible, placement) {
     if (n < 2) return null;
     const availW = W - (chatVisible ? chatWidth : 0);
     const slaves = n - 1;
     if (availW <= 0 || H <= 0) return null;
+    const chrome = {
+      chats: chatVisible ? [{ x: W - chatWidth, y: 0, w: chatWidth, h: H }] : [],
+      resizer: chatVisible ? { x: W - chatWidth, y: 0, w: resizerWidth, h: H } : null
+    };
+    if (placement === "bottom") {
+      const maxByWidth = Math.floor((availW - gap * (slaves - 1)) / slaves / ASPECT);
+      const minH = Math.floor(MIN_STACK_WIDTH / ASPECT);
+      let slaveH2 = Math.min(Math.floor(H * STACK_RATIO), maxByWidth);
+      if (slaveH2 < minH) slaveH2 = Math.min(minH, maxByWidth);
+      if (slaveH2 <= 0) return null;
+      const slaveW = Math.floor(slaveH2 * ASPECT);
+      let masterH2 = H - slaveH2 - gap;
+      let masterW2 = Math.floor(masterH2 * ASPECT);
+      if (masterW2 > availW) {
+        masterW2 = availW;
+        masterH2 = Math.floor(masterW2 / ASPECT);
+      }
+      if (masterW2 <= 0 || masterH2 <= 0) return null;
+      const stackY2 = H - slaveH2;
+      const stackTotal2 = slaves * slaveW + gap * (slaves - 1);
+      const stackX2 = Math.floor((availW - stackTotal2) / 2);
+      const videos2 = [
+        {
+          x: Math.floor((availW - masterW2) / 2),
+          y: Math.max(0, Math.floor((stackY2 - gap - masterH2) / 2)),
+          w: masterW2,
+          h: masterH2
+        }
+      ];
+      for (let i = 0; i < slaves; i++) {
+        videos2.push({ x: stackX2 + i * (slaveW + gap), y: stackY2, w: slaveW, h: slaveH2 });
+      }
+      return { mode: "master", videos: videos2, ...chrome };
+    }
     const maxByHeight = Math.floor((H - gap * (slaves - 1)) / slaves * ASPECT);
     let stackW = Math.min(Math.floor(availW * STACK_RATIO), maxByHeight);
     if (stackW < MIN_STACK_WIDTH) stackW = Math.min(MIN_STACK_WIDTH, maxByHeight);
@@ -776,12 +820,7 @@
     for (let i = 0; i < slaves; i++) {
       videos.push({ x: stackX, y: stackY + i * (slaveH + gap), w: stackW, h: slaveH });
     }
-    return {
-      mode: "master",
-      videos,
-      chats: chatVisible ? [{ x: W - chatWidth, y: 0, w: chatWidth, h: H }] : [],
-      resizer: chatVisible ? { x: W - chatWidth, y: 0, w: resizerWidth, h: H } : null
-    };
+    return { mode: "master", videos, ...chrome };
   }
 
   // src/dnd.js
@@ -1088,7 +1127,7 @@ html.mlpp-swap .mlpp-tile:hover { border-color: #7aa2f7 !important; }
       const forceRows = get("gridRows");
       let layout = null;
       if (master >= 0 && forceCols <= 0) {
-        layout = masterStackLayout(n, W, H, gap, cw, RESIZER_WIDTH, chatVisible);
+        layout = masterStackLayout(n, W, H, gap, cw, RESIZER_WIDTH, chatVisible, stackPlacement());
       }
       if (!layout && chatVisible && forceCols <= 0 && mode2 !== "side") {
         layout = columnLayout(n, W, H, gap, MIN_COLUMN_WIDTH, mode2 === "columns");
@@ -1152,7 +1191,7 @@ html.mlpp-swap .mlpp-tile:hover { border-color: #7aa2f7 !important; }
       rules.push(`#chat-toggle .open { display: ${chatVisible ? "none" : "inline"} !important; }`);
       rules.push(`#chat-toggle .close { display: ${chatVisible ? "inline" : "none"} !important; }`);
       setStyle("layout", rules.join("\n"));
-      document.documentElement.dataset.mlppLayout = `mode=${layout.mode} master=${master} chat=${current} slots=[${slotStream.join(",")}] grid=${forceCols}x${forceRows} setting=${mode2}`;
+      document.documentElement.dataset.mlppLayout = `mode=${layout.mode} master=${master} chat=${current} slots=[${slotStream.join(",")}] grid=${forceCols}x${forceRows} setting=${mode2} stack=${stackPlacement()}`;
       dnd.update(layout.videos);
       const byStream = /* @__PURE__ */ new Map();
       layout.videos.forEach((r, slot) => byStream.set(slotStream[slot], r));
@@ -1338,6 +1377,7 @@ html.mlpp-swap .mlpp-tile:hover { border-color: #7aa2f7 !important; }
 }
 #mlpp-panel .mlpp-tab-body { display: none !important; }
 #mlpp-panel .mlpp-tab-body.mlpp-active { display: block !important; }
+#mlpp-panel .mlpp-hint b { color: #dfe3ea !important; font-weight: 700 !important; }
 #mlpp-panel .mlpp-hint {
   margin: 0 0 14px !important;
   padding: 8px 10px !important;
@@ -1348,6 +1388,19 @@ html.mlpp-swap .mlpp-tile:hover { border-color: #7aa2f7 !important; }
   line-height: 1.5 !important;
 }
 #mlpp-panel .mlpp-row { margin-bottom: 12px !important; }
+/* 서로 붙는 항목들을 위아래 선으로 묶고 가로로 늘어놓는다. */
+#mlpp-panel .mlpp-group {
+  margin: 0 0 12px !important;
+  padding: 10px 0 !important;
+  border-top: 1px solid #2c2d31 !important;
+  border-bottom: 1px solid #2c2d31 !important;
+}
+#mlpp-panel .mlpp-group-name { margin-bottom: 7px !important; color: #e6e6e6 !important; }
+#mlpp-panel .mlpp-group-rows { display: flex !important; gap: 14px !important; }
+#mlpp-panel .mlpp-group-rows .mlpp-row { flex: 1 1 0 !important; min-width: 0 !important; margin-bottom: 0 !important; }
+#mlpp-panel .mlpp-group-rows .mlpp-label { margin-bottom: 0 !important; }
+#mlpp-panel .mlpp-group-rows input[type="number"] { width: 64px !important; }
+#mlpp-panel .mlpp-group > .mlpp-help { margin-top: 8px !important; }
 /* 바로 위 항목에 딸린 하위 설정. 세로줄로 소속을 보인다. */
 #mlpp-panel .mlpp-row.mlpp-sub {
   margin-top: -4px !important;
@@ -1443,12 +1496,41 @@ html.mlpp-swap .mlpp-tile:hover { border-color: #7aa2f7 !important; }
       if (hint) {
         const line = document.createElement("div");
         line.className = "mlpp-hint";
-        line.textContent = hint;
+        const label = document.createElement("b");
+        label.textContent = `${hint.label}: `;
+        line.append(label, hint.text);
         body.append(line);
       }
       bodies.set(name, body);
     }
     panel.append(tabBar, ...bodies.values());
+    const groupRows = /* @__PURE__ */ new Map();
+    function slotFor(field) {
+      const body = bodies.get(field.tab);
+      if (!field.group) return body;
+      const key = `${field.tab}/${field.group}`;
+      let rows = groupRows.get(key);
+      if (!rows) {
+        const box = document.createElement("div");
+        box.className = "mlpp-group";
+        const legend = document.createElement("div");
+        legend.className = "mlpp-group-name";
+        legend.textContent = field.group;
+        rows = document.createElement("div");
+        rows.className = "mlpp-group-rows";
+        box.append(legend, rows);
+        const help = GROUP_HELP[field.group];
+        if (help) {
+          const line = document.createElement("div");
+          line.className = "mlpp-help";
+          line.textContent = help;
+          box.append(line);
+        }
+        body?.append(box);
+        groupRows.set(key, rows);
+      }
+      return rows;
+    }
     for (const field of SCHEMA) {
       let commit2 = function() {
         if (field.type === "bool") {
@@ -1515,7 +1597,7 @@ html.mlpp-swap .mlpp-tile:hover { border-color: #7aa2f7 !important; }
         help.textContent = field.help;
         row.append(help);
       }
-      bodies.get(field.tab)?.append(row);
+      slotFor(field)?.append(row);
     }
     showTab(tabNames[0]);
     const bar = document.createElement("div");
