@@ -4,7 +4,7 @@
 // @name:en      Mul.Live Multiview Enhancer
 // @name:ja-JP   Mul.Live マルチビュー強化
 // @namespace    http://tampermonkey.net/
-// @version      0.25.0
+// @version      0.26.0
 // @license      MIT
 // @description       Resizable chat panel, background-persistent chats, smarter video grid layout and drag-to-swap tiles for Mul.Live.
 // @description:en    Resizable chat panel, background-persistent chats, smarter video grid layout and drag-to-swap tiles for Mul.Live.
@@ -175,7 +175,10 @@
     ["bottom", "right"]
   );
   var TAB_HINTS = {
-    레이아웃: [{ label: "마스터 지정", text: "휠클릭으로 한 플레이어를 확대하세요." }],
+    레이아웃: [
+      { label: "마스터 지정", text: "휠클릭으로 한 플레이어를 확대하세요." },
+      { label: "위치 교환", text: "플레이어를 끌어서 다른 자리와 맞바꿀 수 있어요." }
+    ],
     채팅: [
       { label: "채팅 전환", text: "플레이어에 우클릭하세요." },
       { label: "채팅 추가/제거", text: "플레이어에 Shift+우클릭해서 채팅창을 추가할 수 있어요." },
@@ -680,18 +683,6 @@
           else if (hovered === index) hovered = -1;
           apply();
           break;
-        case "toggle": {
-          const added = !pinned.has(index);
-          if (added) pinned.add(index);
-          else pinned.delete(index);
-          if (masterAutoPinned === index) masterAutoPinned = -1;
-          const rect = rects2.get(index);
-          if (rect) {
-            showToast(added ? "➕S" : "➖S", rect.x + Number(data.x ?? rect.w / 2), rect.y + Number(data.y ?? rect.h / 2));
-          }
-          apply();
-          break;
-        }
       }
     });
     onChange(() => {
@@ -701,6 +692,21 @@
     });
     retimePulses();
     return {
+      /**
+       * 솔로 고정을 뒤집는다. 좌클릭인지 드래그인지 가리는 것은 부모(layout)의 일이라
+       * 버스 메시지가 아니라 이 함수로 받는다.
+       * @param {number} index
+       * @param {number} x 문서 좌표
+       * @param {number} y 문서 좌표
+       */
+      toggle(index, x, y) {
+        const added = !pinned.has(index);
+        if (added) pinned.add(index);
+        else pinned.delete(index);
+        if (masterAutoPinned === index) masterAutoPinned = -1;
+        showToast(added ? "➕S" : "➖S", x, y);
+        apply();
+      },
       /** 플레이어가 준비되면 부른다. 에이전트가 먼저 올라와 있을 수도 있어 양쪽에서 인사한다. */
       greet(index) {
         bus.send(index, { kind: "hello" });
@@ -1088,7 +1094,8 @@
   }
 
   // src/dnd.js
-  var MODIFIER_HINT = "Alt(Option)을 누른 채 끌어서 위치 교환";
+  var MODIFIER_HINT = "플레이어를 끌어서 위치 교환";
+  var DRAG_SLOP = 6;
   var BASE_CSS3 = `
 .mlpp-tile {
   position: absolute !important;
@@ -1101,7 +1108,6 @@
   border: 3px solid rgba(255, 255, 255, 0.35) !important;
   border-radius: 6px !important;
   background-color: rgba(0, 0, 0, 0.4) !important;
-  cursor: grab !important;
   pointer-events: none !important;
   user-select: none !important;
 }
@@ -1116,31 +1122,26 @@
   line-height: 1.2 !important;
   white-space: nowrap !important;
 }
-html.mlpp-swap .mlpp-tile {
-  display: flex !important;
-  pointer-events: auto !important;
-}
-/* 잡기 전 호버는 색을 쓰지 않는다. 보라와 파랑은 끄는 동안의 뜻이 정해져 있다. */
-html.mlpp-swap .mlpp-tile:hover { border-color: rgba(255, 255, 255, 0.7) !important; }
+html.mlpp-swap .mlpp-tile { display: flex !important; }
 /* 잡은 곳은 보라, 놓을 곳은 파랑. */
 .mlpp-tile.mlpp-from {
   border-color: #bb9af7 !important;
   background-color: rgba(187, 154, 247, 0.25) !important;
-  cursor: grabbing !important;
 }
 .mlpp-tile.mlpp-over {
   border-color: #7aa2f7 !important;
   background-color: rgba(122, 162, 247, 0.25) !important;
 }
 `;
-  function createDragSwap({ root, labelOf, swap, schedule }) {
+  function createDragSwap({ root, labelOf, swap, click, schedule }) {
     let rects2 = [];
     const overlays = /* @__PURE__ */ new Map();
     let active = false;
-    let selfAlt = false;
-    const frameAlt = /* @__PURE__ */ new Set();
     let from = -1;
     let over = -1;
+    let moved = false;
+    let startX = 0;
+    let startY = 0;
     let shield = null;
     function ensureOverlay(slot) {
       const existing = overlays.get(slot);
@@ -1151,7 +1152,6 @@ html.mlpp-swap .mlpp-tile:hover { border-color: rgba(255, 255, 255, 0.7) !import
       const label = document.createElement("span");
       label.className = "mlpp-tile-label";
       el.append(label);
-      el.addEventListener("pointerdown", (e) => onDown(e, slot));
       root.append(el);
       overlays.set(slot, el);
       return el;
@@ -1177,96 +1177,84 @@ html.mlpp-swap .mlpp-tile:hover { border-color: rgba(255, 255, 255, 0.7) !import
       setStyle("dnd", rules.join("\n"));
     }
     function setActive(next) {
-      if (!next && from >= 0) return;
       if (active === next) return;
       active = next;
       document.documentElement.classList.toggle("mlpp-swap", active);
-      if (!active) endDrag(false);
     }
-    function refresh() {
-      setActive(selfAlt || frameAlt.size > 0);
-    }
-    function onDown(e, slot) {
-      if (!active || e.button !== 0) return;
-      e.preventDefault();
-      e.stopPropagation();
+    function begin(slot, x, y) {
+      if (from >= 0 || slot < 0 || slot >= rects2.length) return;
       from = slot;
       over = slot;
+      moved = false;
+      startX = x;
+      startY = y;
       shield = document.createElement("div");
-      shield.style.cssText = "position:fixed;inset:0;z-index:2147483646;cursor:grabbing";
+      shield.style.cssText = "position:fixed;inset:0;z-index:2147483646";
       document.body.append(shield);
       document.addEventListener("pointermove", onMove);
       document.addEventListener("pointerup", onUp);
-      document.addEventListener("pointercancel", onCancel);
-      paint();
+      document.addEventListener("pointercancel", cancelDrag);
+      document.addEventListener("keydown", onDragKey);
+      window.addEventListener("blur", cancelDrag);
     }
     function onMove(e) {
+      if (from < 0) return;
+      if (!moved) {
+        if (Math.abs(e.clientX - startX) + Math.abs(e.clientY - startY) <= DRAG_SLOP) return;
+        moved = true;
+        if (shield) shield.style.cursor = "grabbing";
+        setActive(true);
+      }
       const next = slotAt(e.clientX, e.clientY);
       if (next === over) return;
       over = next;
       paint();
     }
     function onUp(e) {
-      const target = slotAt(e.clientX, e.clientY);
+      finish(e.clientX, e.clientY);
+    }
+    function finish(x, y) {
+      if (from < 0) return;
       const source = from;
-      endDrag(true);
-      if (source >= 0 && target >= 0 && target !== source) {
+      const dragged = moved;
+      const target = slotAt(x, y);
+      endDrag();
+      if (!dragged) {
+        click(source, x, y);
+        return;
+      }
+      if (target >= 0 && target !== source) {
         swap(source, target);
         schedule();
       }
-      refresh();
     }
-    function onCancel() {
-      endDrag(true);
-      refresh();
+    function cancelDrag() {
+      if (from < 0) return;
+      endDrag();
     }
-    function endDrag(repaint) {
+    function onDragKey(e) {
+      if (e.key === "Escape") cancelDrag();
+    }
+    function endDrag() {
       document.removeEventListener("pointermove", onMove);
       document.removeEventListener("pointerup", onUp);
-      document.removeEventListener("pointercancel", onCancel);
+      document.removeEventListener("pointercancel", cancelDrag);
+      document.removeEventListener("keydown", onDragKey);
+      window.removeEventListener("blur", cancelDrag);
       shield?.remove();
       shield = null;
       from = -1;
       over = -1;
-      if (repaint) paint();
+      moved = false;
+      setActive(false);
+      paint();
     }
-    window.addEventListener("keydown", (e) => {
-      if (!e.altKey && e.key !== "Alt") return;
-      selfAlt = true;
-      refresh();
-    });
-    window.addEventListener("keyup", (e) => {
-      if (e.key !== "Alt" && e.altKey) return;
-      selfAlt = false;
-      refresh();
-    });
-    document.addEventListener("mousemove", (e) => {
-      if (selfAlt === e.altKey && (e.altKey || frameAlt.size === 0)) return;
-      selfAlt = e.altKey;
-      if (!e.altKey) frameAlt.clear();
-      refresh();
-    });
-    window.addEventListener("blur", () => {
-      selfAlt = false;
-      refresh();
-    });
     document.addEventListener("visibilitychange", () => {
-      if (!document.hidden) return;
-      selfAlt = false;
-      frameAlt.clear();
-      refresh();
+      if (document.hidden) cancelDrag();
     });
     return {
-      /**
-       * 프레임 안 에이전트가 알려온 Alt 상태.
-       * @param {number} index
-       * @param {boolean} on
-       */
-      setFrameAlt(index, on) {
-        if (on) frameAlt.add(index);
-        else frameAlt.delete(index);
-        refresh();
-      },
+      begin,
+      finish,
       /** @param {import('./geometry.js').Rect[]} videoRects */
       update(videoRects) {
         rects2 = videoRects;
@@ -1397,7 +1385,7 @@ html.mlpp-swap .mlpp-tile:hover { border-color: rgba(255, 255, 255, 0.7) !import
   var DEFAULT_CHAT_WIDTH = 350;
   var MIN_COLUMN_WIDTH = 400;
   var TILE_GAP = 0;
-  var DRAG_SLOP = 6;
+  var DRAG_SLOP2 = 6;
   var MENU_GRACE_MS = 300;
   var HOVER_GRACE_MS = 700;
   var BASE_CSS4 = `
@@ -1585,6 +1573,8 @@ html.mlpp-swap .mlpp-tile:hover { border-color: rgba(255, 255, 255, 0.7) !import
           audio.setMaster(master);
         }
       },
+      // 끌지 않고 놓았으면 솔로 토글이다. 그 판정은 dnd 가 한다.
+      click: (slot, x, y) => audio.toggle(slotStream[slot], x, y),
       schedule: () => schedule()
     });
     function setMasterChat(index) {
@@ -1688,7 +1678,7 @@ html.mlpp-swap .mlpp-tile:hover { border-color: rgba(255, 255, 255, 0.7) !import
     }
     function onDragMove(e) {
       if (!rcDrag) return;
-      if (Math.abs(e.clientX - rcDrag.x) + Math.abs(e.clientY - rcDrag.y) > DRAG_SLOP) rcDrag.moved = true;
+      if (Math.abs(e.clientX - rcDrag.x) + Math.abs(e.clientY - rcDrag.y) > DRAG_SLOP2) rcDrag.moved = true;
       const next = chatVisible && chatRegion ? zoneAt(e.clientX, e.clientY, chatRegion, paneBoxes) : null;
       if (sameZone(next, dropZone)) return;
       dropZone = next;
@@ -1933,8 +1923,11 @@ html.mlpp-swap .mlpp-tile:hover { border-color: rgba(255, 255, 255, 0.7) !import
       schedule();
     });
     bus.on((index, data) => {
-      if (data.kind === "alt") {
-        dnd.setFrameAlt(index, !!data.on);
+      if (data.kind === "ldown" || data.kind === "lup") {
+        const at = docPoint(index, data);
+        if (!at) return;
+        if (data.kind === "ldown") dnd.begin(slotStream.indexOf(index), at.x, at.y);
+        else dnd.finish(at.x, at.y);
         return;
       }
       if (data.kind === "master") {
@@ -2560,44 +2553,40 @@ html.mlpp-swap .mlpp-tile:hover { border-color: rgba(255, 255, 255, 0.7) !import
       hovering = on;
       report({ kind: "hover", on });
     }
-    let alting = false;
-    function setAlt(on) {
-      if (alting === on) return;
-      alting = on;
-      report({ kind: "alt", on });
-    }
     const root = document.documentElement;
-    root.addEventListener("mouseenter", (e) => {
-      setHover(true);
-      setAlt(e.altKey);
-    });
-    root.addEventListener("mousemove", (e) => {
-      setHover(true);
-      setAlt(e.altKey);
-    });
-    root.addEventListener("mouseleave", () => {
-      setHover(false);
-      setAlt(false);
-    });
-    window.addEventListener("keydown", (e) => setAlt(e.altKey || e.key === "Alt"));
-    window.addEventListener("keyup", (e) => setAlt(e.key === "Alt" ? false : e.altKey));
-    window.addEventListener("blur", () => {
-      setHover(false);
-      setAlt(false);
-    });
+    root.addEventListener("mouseenter", () => setHover(true));
+    root.addEventListener("mousemove", () => setHover(true));
+    root.addEventListener("mouseleave", () => setHover(false));
+    window.addEventListener("blur", () => setHover(false));
     document.addEventListener("visibilitychange", () => {
-      if (document.hidden) {
-        setHover(false);
-        setAlt(false);
-      }
+      if (document.hidden) setHover(false);
     });
+    window.addEventListener(
+      "mousedown",
+      (e) => {
+        if (e.button !== 0 || !parentOrigin || !inCenter(e)) return;
+        e.stopPropagation();
+        e.preventDefault();
+        report({ kind: "ldown", x: e.clientX, y: e.clientY });
+      },
+      true
+    );
+    window.addEventListener(
+      "mouseup",
+      (e) => {
+        if (e.button !== 0 || !parentOrigin || !inCenter(e)) return;
+        e.stopPropagation();
+        e.preventDefault();
+        report({ kind: "lup", x: e.clientX, y: e.clientY });
+      },
+      true
+    );
     window.addEventListener(
       "click",
       (e) => {
         if (!parentOrigin || !inCenter(e)) return;
         e.stopPropagation();
         e.preventDefault();
-        report({ kind: "toggle", x: e.clientX, y: e.clientY });
       },
       true
     );
