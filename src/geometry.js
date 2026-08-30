@@ -118,7 +118,9 @@ export function columnLayout(n, W, H, gap, minColumnWidth, force = false) {
  * @returns {Layout}
  */
 export function sideLayout(n, W, H, gap, chatWidth, resizerWidth, chatVisible, forceCols = 0, forceRows = 0) {
-  const reserved = chatVisible ? chatWidth + resizerWidth : 0;
+  // 리사이저는 자리를 차지하지 않는다. 채팅 왼쪽 여백 위에 겹쳐 놓는다.
+  // 세로 스트립을 따로 떼어주면 그만큼 화면이 버려진다.
+  const reserved = chatVisible ? chatWidth : 0;
   const availW = W - reserved;
   const grid = forceCols > 0
     ? gridWith(forceCols, Math.max(forceRows, Math.ceil(n / forceCols)), availW, H, gap)
@@ -142,6 +144,6 @@ export function sideLayout(n, W, H, gap, chatWidth, resizerWidth, chatVisible, f
     mode: 'side',
     videos,
     chats: chatVisible ? [{ x: W - chatWidth, y: 0, w: chatWidth, h: H }] : [],
-    resizer: chatVisible ? { x: W - chatWidth - resizerWidth, y: 0, w: resizerWidth, h: H } : null,
+    resizer: chatVisible ? { x: W - chatWidth, y: 0, w: resizerWidth, h: H } : null,
   };
 }

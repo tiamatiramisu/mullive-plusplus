@@ -1,6 +1,6 @@
 # mullive-plusplus STATUS
 
-현재 버전: `v0.5.0` / GitHub: `tiamatiramisu/mullive-plusplus` / Greasy Fork: [593484](https://greasyfork.org/ko/scripts/593484)
+현재 버전: `v0.5.1` / GitHub: `tiamatiramisu/mullive-plusplus` / Greasy Fork: [593484](https://greasyfork.org/ko/scripts/593484)
 
 ## 스테이지
 
@@ -329,3 +329,18 @@ DOM을 건드리지 않으므로 재생이 끊기지 않는다. 열 모드에서
 **주의점 기록** — JSDoc 블록 안에서 숫자 바로 뒤에 한글을 붙이면
 `TS1351: An identifier or keyword cannot immediately follow a numeric literal`로 타입체크가 죽는다.
 `0이면`, `3단` 같은 표현이 해당된다. 워크스페이스 `CLAUDE.md`에 규칙으로 적어뒀다.
+
+### 2026-08-30 — 리사이저가 차지하던 세로 스트립 제거
+
+핸들로 바꿔도 6px 컬럼이 레이아웃에 남아 있으면 낭비는 그대로였다.
+`sideLayout`에서 리사이저 폭을 가용 폭 계산에서 빼고, 리사이저 사각형을 채팅 **왼쪽 끝에 겹치도록** 옮겼다.
+드래그 계산도 그립 가운데가 커서를 따라오게 부호를 바꿨고, `#chat-select`는 그 폭만큼 오른쪽으로 밀었다.
+
+실측 (960×1458 세로, 사이드 모드, 채팅 576):
+
+| 항목 | 결과 |
+|---|---|
+| 영상 영역 오른쪽 끝 / 채팅 시작 | 384 / 384 — 갭 없음 |
+| 리사이저 | `384~390`, 채팅(`384~960`) 안쪽에 겹침 |
+| `elementFromPoint(387, 화면중앙)` | `mlpp-resizer` — 채팅 iframe에 가리지 않고 잡힌다 |
+| `#chat-select` | 392부터 시작 — 잡는 영역을 가리지 않음 |

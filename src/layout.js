@@ -239,8 +239,10 @@ export function startLayout(hooks, chatsRoot, chats) {
       const panel = layout.chats[0];
       rules.push('#chat-select { display: block !important; }');
       if (panel) {
-        const w = Math.max(40, panel.w - 8);
-        rules.push(`#chat-select { left: ${panel.x + 4}px !important; top: 4px !important; width: ${w}px !important; }`);
+        // 리사이저가 채팅 왼쪽 끝에 겹쳐 있으므로 select를 그만큼 밀어 잡는 영역을 가리지 않게 한다.
+        const left = panel.x + RESIZER_WIDTH + 2;
+        const w = Math.max(40, panel.w - RESIZER_WIDTH - 6);
+        rules.push(`#chat-select { left: ${left}px !important; top: 4px !important; width: ${w}px !important; }`);
       }
       if (layout.resizer) rules.push(place('#mlpp-resizer', layout.resizer, 'display: block !important;'));
     }
@@ -296,7 +298,8 @@ export function startLayout(hooks, chatsRoot, chats) {
 
   /** @param {PointerEvent} e */
   function onMove(e) {
-    dragWidth = window.innerWidth - e.clientX - RESIZER_WIDTH / 2;
+    // 리사이저는 채팅 왼쪽 끝에 겹쳐 있다. 그립 가운데가 커서를 따라오게 맞춘다.
+    dragWidth = window.innerWidth - e.clientX + RESIZER_WIDTH / 2;
     schedule();
   }
 
