@@ -1,4 +1,5 @@
 import { setStyle } from './style.js';
+import * as settings from './settings.js';
 
 /**
  * 솔로 / 음소거.
@@ -30,13 +31,23 @@ const BASE_CSS = `
   inset: 0 !important;
   pointer-events: none !important;
 }
+/* 층 순서는 layout.js 의 주석 참고. 채팅(1) 위, 영상(4) 아래에 놓아야
+   열 모드에서 채팅에 가려지지 않으면서 이웃 화면도 가리지 않는다. */
 .mlpp-audio {
   position: absolute !important;
+  z-index: 3 !important;
   display: none !important;
   box-sizing: border-box !important;
   background: transparent !important;
   border: 0 !important;
   pointer-events: none !important;
+  box-shadow: 0 0 14px 3px var(--mlpp-glow, transparent) !important;
+}
+/* 파형처럼 천천히 일렁인다. CSS 애니메이션이라 프레임마다 드는 비용이 없다. */
+.mlpp-audio.mlpp-wave { animation: mlpp-wave 2.4s ease-in-out infinite !important; }
+@keyframes mlpp-wave {
+  0%, 100% { box-shadow: 0 0 10px 2px var(--mlpp-glow); }
+  50% { box-shadow: 0 0 30px 7px var(--mlpp-glow); }
 }
 `;
 
@@ -59,6 +70,8 @@ export function createAudioMixer({ players, root, bus }) {
   const sent = new Map();
   /** @type {Set<number>} 에이전트가 응답한 프레임. 진단용. */
   const agents = new Set();
+  /** @type {Map<number, number>} 프레임이 보고한 소리 크기 0~1 */
+  const levels = new Map();
 
   /** 지금 들려야 하는 스트림 집합. 비어 있으면 "전부 들림"이다. */
   function active() {
@@ -79,9 +92,32 @@ export function createAudioMixer({ players, root, bus }) {
     return el;
   }
 
+  /**
+   * 소리 크기를 글로우 세기에 반영한다. 전체를 다시 그리지 않고 인라인 값만 바꾼다.
+   * @param {number} index
+   */
+  function applyLevel(index) {
+    const el = overlays.get(index);
+    if (!el) return;
+    const level = levels.get(index) ?? 0;
+    el.style.setProperty(
+      'box-shadow',
+      `0 0 ${Math.round(10 + level * 30)}px ${Math.round(2 + level * 7)}px var(--mlpp-glow)`,
+      'important',
+    );
+  }
+
+  /** 실제 소리 반영 여부를 각 프레임에 알린다. */
+  function syncAnalysers() {
+    const on = settings.get('glowFromAudio') !== 0;
+    players.forEach((_, index) => bus.send(index, { kind: 'analyse', on }));
+  }
+
   function apply() {
     const set = active();
     const soloing = set.size > 0;
+    const wave = settings.get('glowPulse') !== 0;
+    const fromAudio = settings.get('glowFromAudio') !== 0;
 
     players.forEach((_, index) => {
       const muted = soloing && !set.has(index);
@@ -104,11 +140,16 @@ export function createAudioMixer({ players, root, bus }) {
         continue;
       }
       const glow = kind === 'solo' ? SOLO_GLOW : MUTED_GLOW;
+      // 타일마다 위상을 어긋나게 해 한 덩어리로 깜빡이지 않게 한다.
       rules.push(
         `#${el.id} { display: block !important; left: ${r.x}px !important; top: ${r.y}px !important;` +
           ` width: ${r.w}px !important; height: ${r.h}px !important;` +
-          ` box-shadow: 0 0 16px 3px ${glow} !important; }`,
+          ` --mlpp-glow: ${glow} !important; animation-delay: -${(index * 0.43).toFixed(2)}s !important; }`,
       );
+      // 소리에 맞추는 동안에는 CSS 애니메이션 대신 인라인으로 세기를 직접 준다.
+      el.classList.toggle('mlpp-wave', wave && !fromAudio);
+      if (fromAudio) applyLevel(index);
+      else el.style.removeProperty('box-shadow');
     }
     setStyle('audio', rules.join('\n'));
     // 밖에서 상태를 읽을 수 있게 남긴다. 프레임 사이를 오가는 기능이라 눈으로만 보면 진단이 어렵다.
@@ -129,7 +170,12 @@ export function createAudioMixer({ players, root, bus }) {
         break;
       case 'ready':
         agents.add(index);
+        bus.send(index, { kind: 'analyse', on: settings.get('glowFromAudio') !== 0 });
         apply();
+        break;
+      case 'level':
+        levels.set(index, Math.max(0, Math.min(1, Number(data.level) || 0)));
+        if (settings.get('glowFromAudio')) applyLevel(index);
         break;
       case 'hover':
         if (data.on) hovered = index;
@@ -142,6 +188,11 @@ export function createAudioMixer({ players, root, bus }) {
         apply();
         break;
     }
+  });
+
+  settings.onChange(() => {
+    syncAnalysers();
+    apply();
   });
 
   return {

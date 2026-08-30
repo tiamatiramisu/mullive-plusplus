@@ -1,6 +1,6 @@
 # mullive-plusplus STATUS
 
-현재 버전: `v0.12.0` / GitHub: `tiamatiramisu/mullive-plusplus` / Greasy Fork: [593484](https://greasyfork.org/ko/scripts/593484)
+현재 버전: `v0.13.0` / GitHub: `tiamatiramisu/mullive-plusplus` / Greasy Fork: [593484](https://greasyfork.org/ko/scripts/593484)
 
 ## 스테이지
 
@@ -496,3 +496,34 @@ node로 미리 계산한 값과 일치.
 
 **검증** — 자동(열 모드) 복귀 상태에서 `mode=columns master=-1`, 영상 4개 480×270 한 줄,
 채팅 4개 동시 표시를 확인. 휠클릭 자체는 자동화 도구에 중간 버튼 액션이 없어 사용자 확인.
+
+### 2026-08-30 — 솔로 하이라이트를 채팅 위로, 그리고 사운드 비주얼라이저
+
+**층 순서 재정리** — 열 모드에서 솔로 단서가 채팅에 완전히 가려졌다.
+원인은 채팅 iframe이 `z-index: 2`, 영상이 `auto(0)` 이라 **채팅이 영상보다 위**에 있었던 것.
+글로우를 "채팅 위, 영상 아래"에 두려면 층을 다시 쌓아야 했다.
+
+| 층 | z-index |
+|---|---|
+| 채팅 iframe | 1 |
+| 자리 표시자 | 2 |
+| 솔로 글로우 | 3 |
+| 영상 iframe | 4 |
+| 리사이저 | 5 |
+| `#chat-select` | 6 |
+| 드래그 타일 | 7 |
+
+**일렁임** (`glowPulse`, 기본 켬) — `@keyframes` 로 box-shadow 를 왕복시킨다.
+CSS 애니메이션이라 프레임마다 드는 비용이 없다. 타일마다 `animation-delay` 를 어긋나게 줘
+한 덩어리로 깜빡이지 않게 했다.
+
+**실제 소리 반영** (`glowFromAudio`, 기본 끔) — 프레임 안 에이전트가 `<video>` 에
+`AnalyserNode` 를 걸어 초당 약 16번 크기를 보고하고, 부모는 인라인 box-shadow 만 갱신한다
+(전체를 다시 그리지 않는다).
+
+기본을 끔으로 둔 이유: `createMediaElementSource` 를 부르면 그 요소의 오디오가 영영
+Web Audio 그래프를 통과하게 된다. `destination` 까지 잇지 않으면 소리가 끊기고, 되돌릴 수 없다.
+그래서 끌 때도 그래프는 그대로 두고 측정 루프만 멈춘다.
+
+**검증** — 사운드 탭 생성(항목 2개)과 z 순서를 실측으로 확인.
+일렁임과 실제 소리 반영은 눈·귀로 봐야 하므로 사용자 확인이 필요하다.

@@ -17,7 +17,7 @@ const MODIFIER_HINT = 'Alt(Option)을 누른 채 끌어서 위치 교환';
 const BASE_CSS = `
 .mlpp-tile {
   position: absolute !important;
-  z-index: 6 !important;
+  z-index: 7 !important;
   display: none !important;
   align-items: flex-start !important;
   justify-content: center !important;

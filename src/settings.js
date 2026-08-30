@@ -55,6 +55,22 @@ export const SCHEMA = [
     help: '휠클릭으로 마스터를 바꾸면 사이드 채팅도 그 방송으로 넘어간다.',
   },
   {
+    key: 'glowPulse',
+    name: '하이라이트 일렁임',
+    tab: '사운드',
+    type: 'bool',
+    value: 1,
+    help: '솔로 하이라이트가 파형처럼 천천히 일렁인다. CSS 애니메이션이라 비용이 없다.',
+  },
+  {
+    key: 'glowFromAudio',
+    name: '실제 소리에 반응',
+    tab: '사운드',
+    type: 'bool',
+    value: 0,
+    help: '일렁임을 실제 소리 크기에 맞춘다. 플레이어 오디오를 Web Audio 그래프로 통과시키므로, 소리가 이상하면 끄고 새로고침한다.',
+  },
+  {
     key: 'chatStagger',
     name: '채팅 생성 간격',
     tab: '채팅',

@@ -49,17 +49,84 @@ function inCenter(e) {
   return x >= CENTER.x0 && x <= CENTER.x1 && y >= CENTER.y0 && y <= CENTER.y1;
 }
 
+/**
+ * 소리 크기 측정.
+ *
+ * 부모는 교차 출처라 플레이어 오디오에 손댈 수 없다. 프레임 안에서는 같은 출처이므로
+ * `<video>` 에 AnalyserNode 를 걸 수 있다. 대신 오디오가 Web Audio 그래프를 통과하게 되므로
+ * 반드시 destination 까지 이어야 소리가 계속 난다. 되돌릴 수 없어 기본값은 꺼짐이다.
+ */
+let analyser = /** @type {AnalyserNode | null} */ (null);
+let buffer = /** @type {Uint8Array<ArrayBuffer> | null} */ (null);
+let analysing = false;
+let lastSent = 0;
+
+function mainVideo() {
+  const videos = [...document.querySelectorAll('video')];
+  // 320x240 짜리는 광고용이라 실제 방송 쪽을 고른다.
+  return videos.find((v) => v.videoWidth > 400) ?? videos[0] ?? null;
+}
+
+function measure() {
+  if (!analysing) return;
+  requestAnimationFrame(measure);
+  if (!analyser || !buffer) return;
+  const now = performance.now();
+  if (now - lastSent < 60) return; // 초당 약 16번이면 눈에는 충분하다
+  lastSent = now;
+  analyser.getByteTimeDomainData(buffer);
+  let peak = 0;
+  for (const v of buffer) {
+    const d = Math.abs(v - 128);
+    if (d > peak) peak = d;
+  }
+  report({ kind: 'level', level: Math.min(1, peak / 80) });
+}
+
+function startAnalyser() {
+  if (analysing) return;
+  analysing = true;
+  requestAnimationFrame(measure);
+  if (analyser) return;
+  const video = mainVideo();
+  if (!video) return;
+  try {
+    const ctx = new AudioContext();
+    const source = ctx.createMediaElementSource(video);
+    analyser = ctx.createAnalyser();
+    analyser.fftSize = 256;
+    source.connect(analyser);
+    // destination 까지 잇지 않으면 소리가 끊긴다.
+    analyser.connect(ctx.destination);
+    buffer = new Uint8Array(analyser.fftSize);
+    ctx.resume();
+  } catch {
+    // 이미 다른 곳에서 소스를 잡았거나 만들 수 없는 상태다. 조용히 포기한다.
+    analyser = null;
+    buffer = null;
+  }
+}
+
+function stopAnalyser() {
+  analysing = false;
+  // 그래프는 그대로 둔다. AudioContext 를 닫으면 소리가 끊긴다.
+  report({ kind: 'level', level: 0 });
+}
+
 export function startPlayerAgent() {
   // 단독 SOOP 탭에서는 아무것도 하지 않는다. 임베드된 프레임일 때만 동작한다.
   if (window.top === window) return;
 
   window.addEventListener('message', (e) => {
     if (!PARENT_ORIGIN.test(e.origin)) return;
-    const data = /** @type {{ mlpp?: unknown, kind?: string, muted?: unknown } | null} */ (e.data);
+    const data = /** @type {{ mlpp?: unknown, kind?: string, muted?: unknown, on?: unknown } | null} */ (e.data);
     if (!data || data.mlpp !== true) return;
     if (data.kind === 'hello') {
       parentOrigin = e.origin;
       report({ kind: 'ready', hasButton: !!soundButton() });
+    } else if (data.kind === 'analyse') {
+      if (data.on) startAnalyser();
+      else stopAnalyser();
     } else if (data.kind === 'mute') {
       const ok = setMuted(!!data.muted);
       if (!ok) {

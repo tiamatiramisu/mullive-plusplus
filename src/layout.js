@@ -33,8 +33,12 @@ const BASE_CSS = `
   min-width: 0 !important;
   pointer-events: none !important;
 }
+/* 층 순서: 채팅(1) < 자리표시자(2) < 솔로 글로우(3) < 영상(4) < 리사이저(5) < select(6) < 드래그 타일(7).
+   글로우가 채팅 위에 보여야 열 모드에서 솔로 단서가 가려지지 않고,
+   영상 아래여야 이웃 화면을 가리지 않는다. */
 #streams iframe {
   position: absolute !important;
+  z-index: 4 !important;
   flex: none !important;
   aspect-ratio: auto !important;
   pointer-events: auto !important;
@@ -47,7 +51,7 @@ const BASE_CSS = `
 }
 #mlpp-chats iframe {
   position: absolute !important;
-  z-index: 2 !important;
+  z-index: 1 !important;
   border: 0 !important;
   background-color: #141517 !important;
   pointer-events: auto !important;
@@ -55,7 +59,7 @@ const BASE_CSS = `
 /* 개별 규칙(#mlpp-ph-N)이 이기도록 특정도를 낮게 둔다. audio.js 의 같은 주석 참고. */
 .mlpp-placeholder {
   position: absolute !important;
-  z-index: 3 !important;
+  z-index: 2 !important;
   display: none !important;
   align-items: center !important;
   justify-content: center !important;
@@ -66,7 +70,7 @@ const BASE_CSS = `
 }
 #chat-select {
   position: absolute !important;
-  z-index: 5 !important;
+  z-index: 6 !important;
   margin: 0 !important;
   pointer-events: auto !important;
 }
@@ -74,7 +78,7 @@ const BASE_CSS = `
    막대를 세로로 길게 그리면 영상과 채팅 사이에 경계선이 생겨 눈에 거슬린다. */
 #mlpp-resizer {
   position: absolute !important;
-  z-index: 4 !important;
+  z-index: 5 !important;
   background-color: transparent !important;
   border: 0 !important;
   cursor: col-resize !important;
