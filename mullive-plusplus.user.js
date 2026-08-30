@@ -4,7 +4,7 @@
 // @name:en      Mul.Live Multiview Enhancer
 // @name:ja-JP   Mul.Live マルチビュー強化
 // @namespace    http://tampermonkey.net/
-// @version      0.12.0
+// @version      0.13.0
 // @license      MIT
 // @description       Resizable chat panel, background-persistent chats, smarter video grid layout and drag-to-swap tiles for Mul.Live.
 // @description:en    Resizable chat panel, background-persistent chats, smarter video grid layout and drag-to-swap tiles for Mul.Live.
@@ -199,6 +199,22 @@
       type: "bool",
       value: 1,
       help: "휠클릭으로 마스터를 바꾸면 사이드 채팅도 그 방송으로 넘어간다."
+    },
+    {
+      key: "glowPulse",
+      name: "하이라이트 일렁임",
+      tab: "사운드",
+      type: "bool",
+      value: 1,
+      help: "솔로 하이라이트가 파형처럼 천천히 일렁인다. CSS 애니메이션이라 비용이 없다."
+    },
+    {
+      key: "glowFromAudio",
+      name: "실제 소리에 반응",
+      tab: "사운드",
+      type: "bool",
+      value: 0,
+      help: "일렁임을 실제 소리 크기에 맞춘다. 플레이어 오디오를 Web Audio 그래프로 통과시키므로, 소리가 이상하면 끄고 새로고침한다."
     },
     {
       key: "chatStagger",
@@ -396,13 +412,23 @@
   inset: 0 !important;
   pointer-events: none !important;
 }
+/* 층 순서는 layout.js 의 주석 참고. 채팅(1) 위, 영상(4) 아래에 놓아야
+   열 모드에서 채팅에 가려지지 않으면서 이웃 화면도 가리지 않는다. */
 .mlpp-audio {
   position: absolute !important;
+  z-index: 3 !important;
   display: none !important;
   box-sizing: border-box !important;
   background: transparent !important;
   border: 0 !important;
   pointer-events: none !important;
+  box-shadow: 0 0 14px 3px var(--mlpp-glow, transparent) !important;
+}
+/* 파형처럼 천천히 일렁인다. CSS 애니메이션이라 프레임마다 드는 비용이 없다. */
+.mlpp-audio.mlpp-wave { animation: mlpp-wave 2.4s ease-in-out infinite !important; }
+@keyframes mlpp-wave {
+  0%, 100% { box-shadow: 0 0 10px 2px var(--mlpp-glow); }
+  50% { box-shadow: 0 0 30px 7px var(--mlpp-glow); }
 }
 `;
   function createAudioMixer({ players, root, bus }) {
@@ -412,6 +438,7 @@
     const overlays = /* @__PURE__ */ new Map();
     const sent = /* @__PURE__ */ new Map();
     const agents = /* @__PURE__ */ new Set();
+    const levels = /* @__PURE__ */ new Map();
     function active() {
       const set2 = new Set(pinned);
       if (hovered >= 0) set2.add(hovered);
@@ -427,9 +454,25 @@
       overlays.set(index, el);
       return el;
     }
+    function applyLevel(index) {
+      const el = overlays.get(index);
+      if (!el) return;
+      const level = levels.get(index) ?? 0;
+      el.style.setProperty(
+        "box-shadow",
+        `0 0 ${Math.round(10 + level * 30)}px ${Math.round(2 + level * 7)}px var(--mlpp-glow)`,
+        "important"
+      );
+    }
+    function syncAnalysers() {
+      const on = get("glowFromAudio") !== 0;
+      players.forEach((_, index) => bus.send(index, { kind: "analyse", on }));
+    }
     function apply() {
       const set2 = active();
       const soloing = set2.size > 0;
+      const wave = get("glowPulse") !== 0;
+      const fromAudio = get("glowFromAudio") !== 0;
       players.forEach((_, index) => {
         const muted = soloing && !set2.has(index);
         if (sent.get(index) !== muted) {
@@ -448,8 +491,11 @@
         }
         const glow = kind === "solo" ? SOLO_GLOW : MUTED_GLOW;
         rules.push(
-          `#${el.id} { display: block !important; left: ${r.x}px !important; top: ${r.y}px !important; width: ${r.w}px !important; height: ${r.h}px !important; box-shadow: 0 0 16px 3px ${glow} !important; }`
+          `#${el.id} { display: block !important; left: ${r.x}px !important; top: ${r.y}px !important; width: ${r.w}px !important; height: ${r.h}px !important; --mlpp-glow: ${glow} !important; animation-delay: -${(index * 0.43).toFixed(2)}s !important; }`
         );
+        el.classList.toggle("mlpp-wave", wave && !fromAudio);
+        if (fromAudio) applyLevel(index);
+        else el.style.removeProperty("box-shadow");
       }
       setStyle("audio", rules.join("\n"));
       document.documentElement.dataset.mlppAudio = `pinned=[${[...pinned].join(",")}] hovered=${hovered} muted=[${players.map((_, i) => soloing && !set2.has(i) ? i : null).filter((i) => i !== null).join(",")}] agents=[${[...agents].join(",")}]`;
@@ -463,7 +509,12 @@
           break;
         case "ready":
           agents.add(index);
+          bus.send(index, { kind: "analyse", on: get("glowFromAudio") !== 0 });
           apply();
+          break;
+        case "level":
+          levels.set(index, Math.max(0, Math.min(1, Number(data.level) || 0)));
+          if (get("glowFromAudio")) applyLevel(index);
           break;
         case "hover":
           if (data.on) hovered = index;
@@ -476,6 +527,10 @@
           apply();
           break;
       }
+    });
+    onChange(() => {
+      syncAnalysers();
+      apply();
     });
     return {
       /** 플레이어가 준비되면 부른다. 에이전트가 먼저 올라와 있을 수도 있어 양쪽에서 인사한다. */
@@ -643,7 +698,7 @@
   var BASE_CSS2 = `
 .mlpp-tile {
   position: absolute !important;
-  z-index: 6 !important;
+  z-index: 7 !important;
   display: none !important;
   align-items: flex-start !important;
   justify-content: center !important;
@@ -806,8 +861,12 @@ html.mlpp-swap .mlpp-tile:hover { border-color: #7aa2f7 !important; }
   min-width: 0 !important;
   pointer-events: none !important;
 }
+/* 층 순서: 채팅(1) < 자리표시자(2) < 솔로 글로우(3) < 영상(4) < 리사이저(5) < select(6) < 드래그 타일(7).
+   글로우가 채팅 위에 보여야 열 모드에서 솔로 단서가 가려지지 않고,
+   영상 아래여야 이웃 화면을 가리지 않는다. */
 #streams iframe {
   position: absolute !important;
+  z-index: 4 !important;
   flex: none !important;
   aspect-ratio: auto !important;
   pointer-events: auto !important;
@@ -820,7 +879,7 @@ html.mlpp-swap .mlpp-tile:hover { border-color: #7aa2f7 !important; }
 }
 #mlpp-chats iframe {
   position: absolute !important;
-  z-index: 2 !important;
+  z-index: 1 !important;
   border: 0 !important;
   background-color: #141517 !important;
   pointer-events: auto !important;
@@ -828,7 +887,7 @@ html.mlpp-swap .mlpp-tile:hover { border-color: #7aa2f7 !important; }
 /* 개별 규칙(#mlpp-ph-N)이 이기도록 특정도를 낮게 둔다. audio.js 의 같은 주석 참고. */
 .mlpp-placeholder {
   position: absolute !important;
-  z-index: 3 !important;
+  z-index: 2 !important;
   display: none !important;
   align-items: center !important;
   justify-content: center !important;
@@ -839,7 +898,7 @@ html.mlpp-swap .mlpp-tile:hover { border-color: #7aa2f7 !important; }
 }
 #chat-select {
   position: absolute !important;
-  z-index: 5 !important;
+  z-index: 6 !important;
   margin: 0 !important;
   pointer-events: auto !important;
 }
@@ -847,7 +906,7 @@ html.mlpp-swap .mlpp-tile:hover { border-color: #7aa2f7 !important; }
    막대를 세로로 길게 그리면 영상과 채팅 사이에 경계선이 생겨 눈에 거슬린다. */
 #mlpp-resizer {
   position: absolute !important;
-  z-index: 4 !important;
+  z-index: 5 !important;
   background-color: transparent !important;
   border: 0 !important;
   cursor: col-resize !important;
@@ -1417,18 +1476,75 @@ html.mlpp-swap .mlpp-tile:hover { border-color: #7aa2f7 !important; }
     const y = e.clientY / h;
     return x >= CENTER.x0 && x <= CENTER.x1 && y >= CENTER.y0 && y <= CENTER.y1;
   }
+  var analyser = (
+    /** @type {AnalyserNode | null} */
+    null
+  );
+  var buffer = (
+    /** @type {Uint8Array<ArrayBuffer> | null} */
+    null
+  );
+  var analysing = false;
+  var lastSent = 0;
+  function mainVideo() {
+    const videos = [...document.querySelectorAll("video")];
+    return videos.find((v) => v.videoWidth > 400) ?? videos[0] ?? null;
+  }
+  function measure() {
+    if (!analysing) return;
+    requestAnimationFrame(measure);
+    if (!analyser || !buffer) return;
+    const now = performance.now();
+    if (now - lastSent < 60) return;
+    lastSent = now;
+    analyser.getByteTimeDomainData(buffer);
+    let peak = 0;
+    for (const v of buffer) {
+      const d = Math.abs(v - 128);
+      if (d > peak) peak = d;
+    }
+    report({ kind: "level", level: Math.min(1, peak / 80) });
+  }
+  function startAnalyser() {
+    if (analysing) return;
+    analysing = true;
+    requestAnimationFrame(measure);
+    if (analyser) return;
+    const video = mainVideo();
+    if (!video) return;
+    try {
+      const ctx = new AudioContext();
+      const source = ctx.createMediaElementSource(video);
+      analyser = ctx.createAnalyser();
+      analyser.fftSize = 256;
+      source.connect(analyser);
+      analyser.connect(ctx.destination);
+      buffer = new Uint8Array(analyser.fftSize);
+      ctx.resume();
+    } catch {
+      analyser = null;
+      buffer = null;
+    }
+  }
+  function stopAnalyser() {
+    analysing = false;
+    report({ kind: "level", level: 0 });
+  }
   function startPlayerAgent() {
     if (window.top === window) return;
     window.addEventListener("message", (e) => {
       if (!PARENT_ORIGIN.test(e.origin)) return;
       const data = (
-        /** @type {{ mlpp?: unknown, kind?: string, muted?: unknown } | null} */
+        /** @type {{ mlpp?: unknown, kind?: string, muted?: unknown, on?: unknown } | null} */
         e.data
       );
       if (!data || data.mlpp !== true) return;
       if (data.kind === "hello") {
         parentOrigin = e.origin;
         report({ kind: "ready", hasButton: !!soundButton() });
+      } else if (data.kind === "analyse") {
+        if (data.on) startAnalyser();
+        else stopAnalyser();
       } else if (data.kind === "mute") {
         const ok = setMuted(!!data.muted);
         if (!ok) {
