@@ -9,6 +9,8 @@
  */
 
 export const LAYOUT_MODES = /** @type {const} */ (['auto', 'columns', 'side']);
+/** 마스터 앤 스택에서 스택이 놓이는 곳. 순서가 곧 설정 enum 인덱스다. */
+export const STACK_PLACEMENTS = /** @type {const} */ (['bottom', 'right']);
 
 /**
  * @typedef {object} Field
@@ -23,17 +25,26 @@ export const LAYOUT_MODES = /** @type {const} */ (['auto', 'columns', 'side']);
  * @property {number} [max]
  * @property {string} [unit]
  * @property {boolean} [indent] 바로 위 항목에 딸린 하위 설정으로 들여쓴다
+ * @property {string} [group] 같은 값을 가진 이웃 항목끼리 한 상자에 가로로 묶인다
  */
 
 /**
  * 탭마다 맨 위에 놓는 한 줄 안내. 클릭 조작만 적는다.
  * 호버 동작은 바로 아래 "호버로 미리 확인" 토글이 대신 알려준다.
- * @type {Record<string, string>}
+ * @type {Record<string, { label: string, text: string }>}
  */
 export const TAB_HINTS = {
-  레이아웃: '휠클릭으로 한 플레이어를 확대하세요',
-  채팅: '플레이어에 우클릭해서 채팅을 전환/추가하세요',
-  사운드: '플레이어에 좌클릭해서 듣고 싶은 영상들을 지정할 수 있어요',
+  레이아웃: { label: '마스터 지정', text: '휠클릭으로 한 플레이어를 확대하세요.' },
+  채팅: { label: '채팅 전환', text: '플레이어에 우클릭해서 채팅을 전환/추가하세요.' },
+  사운드: { label: '솔로 지정', text: '플레이어에 좌클릭해서 듣고 싶은 영상들을 지정할 수 있어요.' },
+};
+
+/**
+ * 묶음 상자 아래에 붙는 설명. 항목마다 따로 적으면 가로로 좁아 읽기 어렵다.
+ * @type {Record<string, string>}
+ */
+export const GROUP_HELP = {
+  '수동 격자': '0이면 자동. 지정하면 열 모드는 적용되지 않고 사이드 채팅이 된다. 행이 방송 수보다 많으면 빈 칸이 남는다.',
 };
 
 /** @type {Field[]} */
@@ -47,17 +58,17 @@ export const SCHEMA = [
     value: 0,
     help: '자동: 가로 화면이고 열 폭이 충분하면 열 모드, 아니면 사이드.',
   },
+  { key: 'gridCols', name: '열 수', tab: '레이아웃', group: '수동 격자', type: 'int', value: 0, min: 0, max: 12 },
+  { key: 'gridRows', name: '행 수', tab: '레이아웃', group: '수동 격자', type: 'int', value: 0, min: 0, max: 12 },
   {
-    key: 'gridCols',
-    name: '수동 격자 — 열 수',
+    key: 'masterStackPlacement',
+    name: '마스터 & 스택 모드 배치',
     tab: '레이아웃',
-    type: 'int',
+    type: 'enum',
+    options: ['스택은 마스터 아래', '스택은 마스터 우측에'],
     value: 0,
-    min: 0,
-    max: 12,
-    help: '0이 아니면 이 열 수로 고정한다. 지정하면 열 모드는 적용되지 않고 사이드 채팅이 된다.',
+    help: '휠클릭으로 마스터를 지정했을 때 나머지 방송을 어디에 쌓을지.',
   },
-  { key: 'gridRows', name: '수동 격자 — 행 수', tab: '레이아웃', type: 'int', value: 0, min: 0, max: 12, help: '방송 수에 필요한 행보다 크면 빈 칸이 남는다.' },
   {
     key: 'chatHoverPreview',
     name: '호버로 미리 확인',
@@ -167,6 +178,11 @@ export function get(key) {
 /** 레이아웃 모드는 enum이라 인덱스로 저장된다. 문자열로 바꿔 돌려준다. */
 export function layoutMode() {
   return LAYOUT_MODES[get('layoutMode')] ?? 'auto';
+}
+
+/** @returns {'right' | 'bottom'} */
+export function stackPlacement() {
+  return STACK_PLACEMENTS[get('masterStackPlacement')] ?? 'bottom';
 }
 
 /**

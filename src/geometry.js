@@ -148,13 +148,16 @@ export function sideLayout(n, W, H, gap, chatWidth, resizerWidth, chatVisible, f
   };
 }
 
-/** 스택 열이 가져갈 가용 폭의 비율 */
+/** 스택이 가져갈 가용 폭(우측) 또는 높이(아래)의 비율 */
 const STACK_RATIO = 0.25;
 const MIN_STACK_WIDTH = 160;
 
 /**
- * 마스터 앤 스택. 큰 화면 하나를 왼쪽에 두고 나머지를 오른쪽에 세로로 쌓는다.
- * 사이드 모드의 변형이므로 채팅은 그대로 오른쪽 패널 하나다.
+ * 마스터 앤 스택. 큰 화면 하나를 두고 나머지를 한 줄로 쌓는다.
+ * 사이드 모드의 변형이므로 채팅은 어느 쪽이든 오른쪽 패널 하나다.
+ *
+ * `bottom` 은 마스터가 위, 스택이 아래 가로줄. `right` 는 마스터가 왼쪽, 스택이 오른쪽 세로줄.
+ * 어느 쪽이든 스택이 먼저 자기 크기를 정하고 마스터가 남은 자리를 16:9로 채운다.
  *
  * @param {number} n
  * @param {number} W
@@ -163,13 +166,55 @@ const MIN_STACK_WIDTH = 160;
  * @param {number} chatWidth
  * @param {number} resizerWidth
  * @param {boolean} chatVisible
+ * @param {'right' | 'bottom'} placement
  * @returns {Layout | null}
  */
-export function masterStackLayout(n, W, H, gap, chatWidth, resizerWidth, chatVisible) {
+export function masterStackLayout(n, W, H, gap, chatWidth, resizerWidth, chatVisible, placement) {
   if (n < 2) return null;
   const availW = W - (chatVisible ? chatWidth : 0);
   const slaves = n - 1;
   if (availW <= 0 || H <= 0) return null;
+
+  const chrome = {
+    chats: chatVisible ? [{ x: W - chatWidth, y: 0, w: chatWidth, h: H }] : [],
+    resizer: chatVisible ? { x: W - chatWidth, y: 0, w: resizerWidth, h: H } : null,
+  };
+
+  if (placement === 'bottom') {
+    // 스택이 가로로 늘어서므로 이번에는 가용 폭이 높이의 상한을 정한다.
+    const maxByWidth = Math.floor((availW - gap * (slaves - 1)) / slaves / ASPECT);
+    const minH = Math.floor(MIN_STACK_WIDTH / ASPECT);
+    let slaveH = Math.min(Math.floor(H * STACK_RATIO), maxByWidth);
+    if (slaveH < minH) slaveH = Math.min(minH, maxByWidth);
+    if (slaveH <= 0) return null;
+
+    const slaveW = Math.floor(slaveH * ASPECT);
+    let masterH = H - slaveH - gap;
+    let masterW = Math.floor(masterH * ASPECT);
+    if (masterW > availW) {
+      masterW = availW;
+      masterH = Math.floor(masterW / ASPECT);
+    }
+    if (masterW <= 0 || masterH <= 0) return null;
+
+    const stackY = H - slaveH;
+    const stackTotal = slaves * slaveW + gap * (slaves - 1);
+    const stackX = Math.floor((availW - stackTotal) / 2);
+
+    /** @type {Rect[]} */
+    const videos = [
+      {
+        x: Math.floor((availW - masterW) / 2),
+        y: Math.max(0, Math.floor((stackY - gap - masterH) / 2)),
+        w: masterW,
+        h: masterH,
+      },
+    ];
+    for (let i = 0; i < slaves; i++) {
+      videos.push({ x: stackX + i * (slaveW + gap), y: stackY, w: slaveW, h: slaveH });
+    }
+    return { mode: 'master', videos, ...chrome };
+  }
 
   // 스택은 세로로 쌓이므로 화면 높이가 폭의 상한을 정한다.
   const maxByHeight = Math.floor(((H - gap * (slaves - 1)) / slaves) * ASPECT);
@@ -203,10 +248,5 @@ export function masterStackLayout(n, W, H, gap, chatWidth, resizerWidth, chatVis
     videos.push({ x: stackX, y: stackY + i * (slaveH + gap), w: stackW, h: slaveH });
   }
 
-  return {
-    mode: 'master',
-    videos,
-    chats: chatVisible ? [{ x: W - chatWidth, y: 0, w: chatWidth, h: H }] : [],
-    resizer: chatVisible ? { x: W - chatWidth, y: 0, w: resizerWidth, h: H } : null,
-  };
+  return { mode: 'master', videos, ...chrome };
 }

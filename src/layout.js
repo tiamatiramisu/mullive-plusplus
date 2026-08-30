@@ -206,7 +206,7 @@ export function startLayout(hooks, chatsRoot, chats, audio, bus) {
     // 마스터 앤 스택은 사이드 채팅 배치라, 열 모드에서 들어오면 채팅이 단일 패널로 바뀐다.
     // 마스터를 다시 눌러 해제하면 원래 배치로 되돌아온다.
     if (master >= 0 && forceCols <= 0) {
-      layout = masterStackLayout(n, W, H, gap, cw, RESIZER_WIDTH, chatVisible);
+      layout = masterStackLayout(n, W, H, gap, cw, RESIZER_WIDTH, chatVisible, settings.stackPlacement());
     }
     // 수동 격자를 지정하면 영상이 여러 행에 놓이므로 "영상 아래 자기 채팅"이 성립하지 않는다. 사이드로 간다.
     if (!layout && chatVisible && forceCols <= 0 && mode !== 'side') {
@@ -300,7 +300,8 @@ export function startLayout(hooks, chatsRoot, chats, audio, bus) {
     // 설정끼리 서로를 죽이는 상황(수동 격자가 열 모드를 끄는 등)을 눈으로 확인하기 어렵다.
     document.documentElement.dataset.mlppLayout =
       `mode=${layout.mode} master=${master} chat=${current}` +
-      ` slots=[${slotStream.join(',')}] grid=${forceCols}x${forceRows} setting=${mode}`;
+      ` slots=[${slotStream.join(',')}] grid=${forceCols}x${forceRows} setting=${mode}` +
+      ` stack=${settings.stackPlacement()}`;
     dnd.update(layout.videos);
 
     // 오디오 오버레이는 슬롯이 아니라 방송 기준이다. 드래그로 자리가 바뀌어도 따라간다.

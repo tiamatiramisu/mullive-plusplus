@@ -81,6 +81,7 @@ const BASE_CSS = `
 }
 #mlpp-panel .mlpp-tab-body { display: none !important; }
 #mlpp-panel .mlpp-tab-body.mlpp-active { display: block !important; }
+#mlpp-panel .mlpp-hint b { color: #dfe3ea !important; font-weight: 700 !important; }
 #mlpp-panel .mlpp-hint {
   margin: 0 0 14px !important;
   padding: 8px 10px !important;
@@ -91,6 +92,19 @@ const BASE_CSS = `
   line-height: 1.5 !important;
 }
 #mlpp-panel .mlpp-row { margin-bottom: 12px !important; }
+/* 서로 붙는 항목들을 위아래 선으로 묶고 가로로 늘어놓는다. */
+#mlpp-panel .mlpp-group {
+  margin: 0 0 12px !important;
+  padding: 10px 0 !important;
+  border-top: 1px solid #2c2d31 !important;
+  border-bottom: 1px solid #2c2d31 !important;
+}
+#mlpp-panel .mlpp-group-name { margin-bottom: 7px !important; color: #e6e6e6 !important; }
+#mlpp-panel .mlpp-group-rows { display: flex !important; gap: 14px !important; }
+#mlpp-panel .mlpp-group-rows .mlpp-row { flex: 1 1 0 !important; min-width: 0 !important; margin-bottom: 0 !important; }
+#mlpp-panel .mlpp-group-rows .mlpp-label { margin-bottom: 0 !important; }
+#mlpp-panel .mlpp-group-rows input[type="number"] { width: 64px !important; }
+#mlpp-panel .mlpp-group > .mlpp-help { margin-top: 8px !important; }
 /* 바로 위 항목에 딸린 하위 설정. 세로줄로 소속을 보인다. */
 #mlpp-panel .mlpp-row.mlpp-sub {
   margin-top: -4px !important;
@@ -203,12 +217,49 @@ export function createSettingsPanel(actions) {
     if (hint) {
       const line = document.createElement('div');
       line.className = 'mlpp-hint';
-      line.textContent = hint;
+      const label = document.createElement('b');
+      label.textContent = `${hint.label}: `;
+      line.append(label, hint.text);
       body.append(line);
     }
     bodies.set(name, body);
   }
   panel.append(tabBar, ...bodies.values());
+
+  /** @type {Map<string, HTMLElement>} 묶음 이름 → 항목이 들어갈 가로 줄 */
+  const groupRows = new Map();
+
+  /**
+   * 항목이 들어갈 자리. 묶음이 지정돼 있으면 상자를 처음 만날 때 만들어 탭에 붙인다.
+   * @param {import('./settings.js').Field} field
+   * @returns {HTMLElement | undefined}
+   */
+  function slotFor(field) {
+    const body = bodies.get(field.tab);
+    if (!field.group) return body;
+    const key = `${field.tab}/${field.group}`;
+    let rows = groupRows.get(key);
+    if (!rows) {
+      const box = document.createElement('div');
+      box.className = 'mlpp-group';
+      const legend = document.createElement('div');
+      legend.className = 'mlpp-group-name';
+      legend.textContent = field.group;
+      rows = document.createElement('div');
+      rows.className = 'mlpp-group-rows';
+      box.append(legend, rows);
+      const help = settings.GROUP_HELP[field.group];
+      if (help) {
+        const line = document.createElement('div');
+        line.className = 'mlpp-help';
+        line.textContent = help;
+        box.append(line);
+      }
+      body?.append(box);
+      groupRows.set(key, rows);
+    }
+    return rows;
+  }
 
   for (const field of settings.SCHEMA) {
     const row = document.createElement('div');
@@ -280,7 +331,7 @@ export function createSettingsPanel(actions) {
       help.textContent = field.help;
       row.append(help);
     }
-    bodies.get(field.tab)?.append(row);
+    slotFor(field)?.append(row);
   }
 
   showTab(tabNames[0]);
