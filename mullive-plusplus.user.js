@@ -4,7 +4,7 @@
 // @name:en      Mul.Live Multiview Enhancer
 // @name:ja-JP   Mul.Live マルチビュー強化
 // @namespace    http://tampermonkey.net/
-// @version      0.17.0
+// @version      0.18.0
 // @license      MIT
 // @description       Resizable chat panel, background-persistent chats, smarter video grid layout and drag-to-swap tiles for Mul.Live.
 // @description:en    Resizable chat panel, background-persistent chats, smarter video grid layout and drag-to-swap tiles for Mul.Live.
@@ -171,6 +171,11 @@
     /** @type {const} */
     ["auto", "columns", "side"]
   );
+  var TAB_HINTS = {
+    레이아웃: "휠클릭으로 한 플레이어를 확대하세요",
+    채팅: "플레이어에 우클릭해서 채팅을 전환/추가하세요",
+    사운드: "플레이어에 좌클릭해서 듣고 싶은 영상들을 지정할 수 있어요"
+  };
   var SCHEMA = [
     {
       key: "layoutMode",
@@ -458,6 +463,8 @@
     const sent = /* @__PURE__ */ new Map();
     const agents = /* @__PURE__ */ new Set();
     let shown = [];
+    const lastRipple = /* @__PURE__ */ new Map();
+    const analysers = /* @__PURE__ */ new Set();
     let masterAutoPinned = -1;
     let pulseTimer = 0;
     function active() {
@@ -482,6 +489,7 @@
       const el = overlays.get(index);
       const node = el?.querySelector(".mlpp-ripple");
       if (!node || !shown.includes(index)) return;
+      lastRipple.set(index, Date.now());
       const peak = RIPPLE_OPACITY * (0.6 + strength * 0.4);
       node.animate(
         [
@@ -497,9 +505,14 @@
         clearInterval(pulseTimer);
         pulseTimer = 0;
       }
-      if (get("glowPulse") === 0 || get("glowFromAudio") !== 0) return;
+      if (get("glowPulse") === 0) return;
       pulseTimer = setInterval(() => {
-        shown.forEach((index, i) => setTimeout(() => ripple(index, 0.55), i * PULSE_STAGGER_MS));
+        shown.forEach(
+          (index, i) => setTimeout(() => {
+            if (Date.now() - (lastRipple.get(index) ?? 0) < PULSE_PERIOD_MS * 0.9) return;
+            ripple(index, 0.55);
+          }, i * PULSE_STAGGER_MS)
+        );
       }, PULSE_PERIOD_MS);
     }
     function syncAnalysers() {
@@ -531,7 +544,7 @@
       }
       shown = next;
       setStyle("audio", rules.join("\n"));
-      document.documentElement.dataset.mlppAudio = `pinned=[${[...pinned].join(",")}] hovered=${hovered} muted=[${players.map((_, i) => soloing && !set2.has(i) ? i : null).filter((i) => i !== null).join(",")}] agents=[${[...agents].join(",")}]`;
+      document.documentElement.dataset.mlppAudio = `pinned=[${[...pinned].join(",")}] hovered=${hovered} muted=[${players.map((_, i) => soloing && !set2.has(i) ? i : null).filter((i) => i !== null).join(",")}] agents=[${[...agents].join(",")}] analysers=[${[...analysers].join(",")}]`;
     }
     bus.on((index, data) => {
       switch (data.kind) {
@@ -547,6 +560,11 @@
           break;
         case "beat":
           if (get("glowPulse") !== 0) ripple(index, Math.max(0, Math.min(1, Number(data.strength) || 0)));
+          break;
+        case "analyser":
+          if (data.ok) analysers.add(index);
+          else analysers.delete(index);
+          apply();
           break;
         case "hover":
           if (data.on) hovered = index;
@@ -1303,6 +1321,15 @@ html.mlpp-swap .mlpp-tile:hover { border-color: #7aa2f7 !important; }
 }
 #mlpp-panel .mlpp-tab-body { display: none !important; }
 #mlpp-panel .mlpp-tab-body.mlpp-active { display: block !important; }
+#mlpp-panel .mlpp-hint {
+  margin: 0 0 14px !important;
+  padding: 8px 10px !important;
+  border-radius: 4px !important;
+  background-color: #23252a !important;
+  color: #b9bec7 !important;
+  font-size: 12px !important;
+  line-height: 1.5 !important;
+}
 #mlpp-panel .mlpp-row { margin-bottom: 12px !important; }
 #mlpp-panel .mlpp-label {
   display: flex !important;
@@ -1364,11 +1391,11 @@ html.mlpp-swap .mlpp-tile:hover { border-color: #7aa2f7 !important; }
     gear.id = "mlpp-gear";
     gear.type = "button";
     gear.textContent = "⚙";
-    gear.title = "Mul.Live++ 설정";
+    gear.title = "Mul.Live++ 관리 패널";
     const panel = document.createElement("div");
     panel.id = "mlpp-panel";
     const title = document.createElement("h2");
-    title.textContent = "Mul.Live++ 설정";
+    title.textContent = "Mul.Live++ 관리 패널";
     panel.append(title);
     const controls = /* @__PURE__ */ new Map();
     const tabNames = [...new Set(SCHEMA.map((f) => f.tab))];
@@ -1389,6 +1416,13 @@ html.mlpp-swap .mlpp-tile:hover { border-color: #7aa2f7 !important; }
       tabButtons.set(name, button);
       const body = document.createElement("div");
       body.className = "mlpp-tab-body";
+      const hint = TAB_HINTS[name];
+      if (hint) {
+        const line = document.createElement("div");
+        line.className = "mlpp-hint";
+        line.textContent = hint;
+        body.append(line);
+      }
       bodies.set(name, body);
     }
     panel.append(tabBar, ...bodies.values());
@@ -1546,7 +1580,8 @@ html.mlpp-swap .mlpp-tile:hover { border-color: #7aa2f7 !important; }
   var lastSent = 0;
   function mainVideo() {
     const videos = [...document.querySelectorAll("video")];
-    return videos.find((v) => v.videoWidth > 400) ?? videos[0] ?? null;
+    if (videos.length === 0) return null;
+    return videos.reduce((best, v) => v.videoWidth > best.videoWidth ? v : best, videos[0]);
   }
   var AVG_DECAY = 0.9;
   var PEAK_RATIO = 1.35;
@@ -1572,12 +1607,19 @@ html.mlpp-swap .mlpp-tile:hover { border-color: #7aa2f7 !important; }
     }
   }
   function startAnalyser() {
-    if (analysing) return;
     analysing = true;
-    requestAnimationFrame(measure);
-    if (analyser) return;
+    if (analyser) {
+      requestAnimationFrame(measure);
+      report({ kind: "analyser", ok: true });
+      return;
+    }
     const video = mainVideo();
-    if (!video) return;
+    if (!video || video.videoWidth === 0) {
+      document.addEventListener("playing", () => analysing && startAnalyser(), { capture: true, once: true });
+      report({ kind: "analyser", ok: false });
+      requestAnimationFrame(measure);
+      return;
+    }
     try {
       const ctx = new AudioContext();
       const source = ctx.createMediaElementSource(video);
@@ -1587,14 +1629,18 @@ html.mlpp-swap .mlpp-tile:hover { border-color: #7aa2f7 !important; }
       analyser.connect(ctx.destination);
       buffer = new Uint8Array(analyser.fftSize);
       ctx.resume();
+      report({ kind: "analyser", ok: true });
     } catch {
       analyser = null;
       buffer = null;
+      report({ kind: "analyser", ok: false });
     }
+    requestAnimationFrame(measure);
   }
   function stopAnalyser() {
     analysing = false;
     avg = 0;
+    report({ kind: "analyser", ok: false });
   }
   function startPlayerAgent() {
     if (window.top === window) return;
