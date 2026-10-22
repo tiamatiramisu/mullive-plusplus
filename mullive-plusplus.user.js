@@ -4,7 +4,7 @@
 // @name:en      Mul.Live Multiview Enhancer
 // @name:ja-JP   Mul.Live マルチビュー強化
 // @namespace    http://tampermonkey.net/
-// @version      0.26.5
+// @version      0.26.6
 // @license      MIT
 // @description       Resizable chat panel, background-persistent chats, smarter video grid layout and drag-to-swap tiles for Mul.Live.
 // @description:en    Resizable chat panel, background-persistent chats, smarter video grid layout and drag-to-swap tiles for Mul.Live.
@@ -72,6 +72,13 @@
   }
   function warn(...args) {
     console.warn(TAG, ...args);
+  }
+  function countBoot(role) {
+    const marks = document.documentElement.dataset;
+    const key = `mlppBoot${role}`;
+    const n = Number(marks[key] ?? "0") + 1;
+    marks[key] = String(n);
+    return n;
   }
 
   // src/style.js
@@ -262,7 +269,7 @@
       type: "bool",
       value: 1,
       indent: true,
-      help: "깜빡임이 실제 소리를 반영합니다. 렉이 걸린다면 비활성화 해주세요."
+      help: "깜빡임이 실제 소리를 반영합니다. 렉이 걸린다면 비활성화 해주세요. SOOP 스마트 볼륨이 켜진 방송은 분석하지 않아요(바꾼 뒤엔 새로고침)."
     },
     {
       key: "urlSync",
@@ -578,6 +585,7 @@
     const lastRipple = /* @__PURE__ */ new Map();
     const analysers = /* @__PURE__ */ new Set();
     const dupes = /* @__PURE__ */ new Map();
+    const smart = /* @__PURE__ */ new Set();
     let masterAutoPinned = -1;
     let pulseTimer = 0;
     function active() {
@@ -657,7 +665,7 @@
       }
       shown = next;
       setStyle("audio", rules.join("\n"));
-      document.documentElement.dataset.mlppAudio = `pinned=[${[...pinned].join(",")}] hovered=${hovered} muted=[${players.map((_, i) => soloing && !set2.has(i) ? i : null).filter((i) => i !== null).join(",")}] agents=[${[...agents].join(",")}] analysers=[${[...analysers].join(",")}]` + (dupes.size ? ` dupes=[${[...dupes].map(([i, n]) => `${i}x${n}`).join(",")}]` : "");
+      document.documentElement.dataset.mlppAudio = `pinned=[${[...pinned].join(",")}] hovered=${hovered} muted=[${players.map((_, i) => soloing && !set2.has(i) ? i : null).filter((i) => i !== null).join(",")}] agents=[${[...agents].join(",")}] analysers=[${[...analysers].join(",")}]` + (dupes.size ? ` dupes=[${[...dupes].map(([i, n]) => `${i}x${n}`).join(",")}]` : "") + (smart.size ? ` smart=[${[...smart].join(",")}]` : "");
     }
     bus.on((index, data) => {
       switch (data.kind) {
@@ -678,6 +686,8 @@
         case "analyser":
           if (data.ok) analysers.add(index);
           else analysers.delete(index);
+          if (data.smart) smart.add(index);
+          else smart.delete(index);
           apply();
           break;
         case "hover":
@@ -2491,7 +2501,20 @@ html.mlpp-swap .mlpp-tile { display: flex !important; }
     ctx?.resume().catch(() => {
     });
   }
+  function smartVolumeOn() {
+    const m = document.cookie.match(/(?:^|;\s*)_smartVolume=([^;]*)/);
+    if (!m) return false;
+    try {
+      return new URLSearchParams(decodeURIComponent(m[1])).get("active") === "1";
+    } catch {
+      return false;
+    }
+  }
   function startAnalyser() {
+    if (smartVolumeOn()) {
+      report({ kind: "analyser", ok: false, smart: true });
+      return;
+    }
     analysing = true;
     if (analyser) {
       startLoop();
@@ -2539,10 +2562,7 @@ html.mlpp-swap .mlpp-tile { display: flex !important; }
   }
   function startPlayerAgent() {
     if (window.top === window) return;
-    const marks = document.documentElement.dataset;
-    const starts = Number(marks.mlppAgentStarts ?? "0") + 1;
-    marks.mlppAgentStarts = String(starts);
-    if (starts > 1) return;
+    if (countBoot("Player") > 1) return;
     window.addEventListener("message", (e) => {
       if (!PARENT_ORIGIN.test(e.origin)) return;
       const data = (
@@ -2552,7 +2572,7 @@ html.mlpp-swap .mlpp-tile { display: flex !important; }
       if (!data || data.mlpp !== true) return;
       if (data.kind === "hello") {
         parentOrigin = e.origin;
-        report({ kind: "ready", hasButton: !!soundButton(), starts: Number(marks.mlppAgentStarts ?? "1") });
+        report({ kind: "ready", hasButton: !!soundButton(), starts: Number(document.documentElement.dataset.mlppBootPlayer ?? "1") });
       } else if (data.kind === "analyse") {
         if (data.on) startAnalyser();
         else stopAnalyser();
@@ -2666,6 +2686,7 @@ html.mlpp-swap .mlpp-tile { display: flex !important; }
   var parentOrigin2 = null;
   function startChatAgent() {
     if (window.top === window) return;
+    if (countBoot("Chat") > 1) return;
     window.addEventListener("message", (e) => {
       if (!PARENT_ORIGIN2.test(e.origin)) return;
       const data = (
@@ -2743,6 +2764,8 @@ html.mlpp-swap .mlpp-tile { display: flex !important; }
   if (SOOP_HOST.test(location.hostname)) {
     if (/vtype=chat/.test(location.search)) startChatAgent();
     else startPlayerAgent();
+  } else if (countBoot("Page") > 1) {
+    warn("이 스크립트가 이 페이지에서 이미 돌고 있습니다. 유저스크립트 매니저에 같은 스크립트가 두 번 설치돼 있는지 확인하세요.");
   } else {
     watchPlayers();
     let cspReports = 0;
