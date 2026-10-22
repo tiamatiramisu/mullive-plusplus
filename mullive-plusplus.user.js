@@ -4,7 +4,7 @@
 // @name:en      Mul.Live Multiview Enhancer
 // @name:ja-JP   Mul.Live マルチビュー強化
 // @namespace    http://tampermonkey.net/
-// @version      0.26.4
+// @version      0.26.5
 // @license      MIT
 // @description       Resizable chat panel, background-persistent chats, smarter video grid layout and drag-to-swap tiles for Mul.Live.
 // @description:en    Resizable chat panel, background-persistent chats, smarter video grid layout and drag-to-swap tiles for Mul.Live.
@@ -577,6 +577,7 @@
     let shown = [];
     const lastRipple = /* @__PURE__ */ new Map();
     const analysers = /* @__PURE__ */ new Set();
+    const dupes = /* @__PURE__ */ new Map();
     let masterAutoPinned = -1;
     let pulseTimer = 0;
     function active() {
@@ -656,7 +657,7 @@
       }
       shown = next;
       setStyle("audio", rules.join("\n"));
-      document.documentElement.dataset.mlppAudio = `pinned=[${[...pinned].join(",")}] hovered=${hovered} muted=[${players.map((_, i) => soloing && !set2.has(i) ? i : null).filter((i) => i !== null).join(",")}] agents=[${[...agents].join(",")}] analysers=[${[...analysers].join(",")}]`;
+      document.documentElement.dataset.mlppAudio = `pinned=[${[...pinned].join(",")}] hovered=${hovered} muted=[${players.map((_, i) => soloing && !set2.has(i) ? i : null).filter((i) => i !== null).join(",")}] agents=[${[...agents].join(",")}] analysers=[${[...analysers].join(",")}]` + (dupes.size ? ` dupes=[${[...dupes].map(([i, n]) => `${i}x${n}`).join(",")}]` : "");
     }
     bus.on((index, data) => {
       switch (data.kind) {
@@ -667,6 +668,7 @@
           break;
         case "ready":
           agents.add(index);
+          if (Number(data.starts) > 1) dupes.set(index, Number(data.starts));
           bus.send(index, { kind: "analyse", on: get("glowFromAudio") !== 0 });
           apply();
           break;
@@ -2447,6 +2449,7 @@ html.mlpp-swap .mlpp-tile { display: flex !important; }
     null
   );
   var analysing = false;
+  var looping = false;
   var lastSent = 0;
   function mainVideo() {
     const videos = [...document.querySelectorAll("video")];
@@ -2458,8 +2461,16 @@ html.mlpp-swap .mlpp-tile { display: flex !important; }
   var PEAK_FLOOR = 0.06;
   var REFRACTORY_MS = 140;
   var avg = 0;
+  function startLoop() {
+    if (looping) return;
+    looping = true;
+    requestAnimationFrame(measure);
+  }
   function measure() {
-    if (!analysing) return;
+    if (!analysing) {
+      looping = false;
+      return;
+    }
     requestAnimationFrame(measure);
     if (!analyser || !buffer) return;
     analyser.getByteTimeDomainData(buffer);
@@ -2483,7 +2494,7 @@ html.mlpp-swap .mlpp-tile { display: flex !important; }
   function startAnalyser() {
     analysing = true;
     if (analyser) {
-      requestAnimationFrame(measure);
+      startLoop();
       wake();
       report({ kind: "analyser", ok: ctx?.state === "running" });
       return;
@@ -2492,12 +2503,17 @@ html.mlpp-swap .mlpp-tile { display: flex !important; }
     if (!video || video.videoWidth === 0) {
       document.addEventListener("playing", () => analysing && startAnalyser(), { capture: true, once: true });
       report({ kind: "analyser", ok: false });
-      requestAnimationFrame(measure);
+      startLoop();
+      return;
+    }
+    if (video.dataset.mlppTapped) {
+      report({ kind: "analyser", ok: false });
       return;
     }
     try {
       ctx = new AudioContext();
       const source = ctx.createMediaElementSource(video);
+      video.dataset.mlppTapped = "1";
       analyser = ctx.createAnalyser();
       analyser.fftSize = 256;
       source.connect(analyser);
@@ -2514,7 +2530,7 @@ html.mlpp-swap .mlpp-tile { display: flex !important; }
       buffer = null;
       report({ kind: "analyser", ok: false });
     }
-    requestAnimationFrame(measure);
+    startLoop();
   }
   function stopAnalyser() {
     analysing = false;
@@ -2523,6 +2539,10 @@ html.mlpp-swap .mlpp-tile { display: flex !important; }
   }
   function startPlayerAgent() {
     if (window.top === window) return;
+    const marks = document.documentElement.dataset;
+    const starts = Number(marks.mlppAgentStarts ?? "0") + 1;
+    marks.mlppAgentStarts = String(starts);
+    if (starts > 1) return;
     window.addEventListener("message", (e) => {
       if (!PARENT_ORIGIN.test(e.origin)) return;
       const data = (
@@ -2532,7 +2552,7 @@ html.mlpp-swap .mlpp-tile { display: flex !important; }
       if (!data || data.mlpp !== true) return;
       if (data.kind === "hello") {
         parentOrigin = e.origin;
-        report({ kind: "ready", hasButton: !!soundButton() });
+        report({ kind: "ready", hasButton: !!soundButton(), starts: Number(marks.mlppAgentStarts ?? "1") });
       } else if (data.kind === "analyse") {
         if (data.on) startAnalyser();
         else stopAnalyser();
