@@ -91,6 +91,8 @@ export function createAudioMixer({ players, root, bus }) {
   const lastRipple = new Map();
   /** @type {Set<number>} 소리 분석에 성공한 프레임. 진단용. */
   const analysers = new Set();
+  /** @type {Map<number, number>} 스크립트가 두 번 이상 뜬 프레임과 그 횟수. 진단용이다. */
+  const dupes = new Map();
   /**
    * 마스터가 되면서 **우리가** 솔로에 넣은 방송.
    * 마스터를 풀 때 되돌리려면 원래 솔로였는지를 기억해야 한다. -1이면 없음.
@@ -211,7 +213,8 @@ export function createAudioMixer({ players, root, bus }) {
       `pinned=[${[...pinned].join(',')}] hovered=${hovered} muted=[${players
         .map((_, i) => (soloing && !set.has(i) ? i : null))
         .filter((i) => i !== null)
-        .join(',')}] agents=[${[...agents].join(',')}] analysers=[${[...analysers].join(',')}]`;
+        .join(',')}] agents=[${[...agents].join(',')}] analysers=[${[...analysers].join(',')}]` +
+        (dupes.size ? ` dupes=[${[...dupes].map(([i, n]) => `${i}x${n}`).join(',')}]` : '');
   }
 
   bus.on((index, data) => {
@@ -224,6 +227,8 @@ export function createAudioMixer({ players, root, bus }) {
         break;
       case 'ready':
         agents.add(index);
+        // 한 프레임에 스크립트가 몇 번 떴는지. 둘 이상이면 에이전트가 막았더라도 진단에 남긴다.
+        if (Number(data.starts) > 1) dupes.set(index, Number(data.starts));
         bus.send(index, { kind: 'analyse', on: settings.get('glowFromAudio') !== 0 });
         apply();
         break;

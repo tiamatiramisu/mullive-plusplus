@@ -1,6 +1,6 @@
 # mullive-plusplus STATUS
 
-현재 버전: `v0.26.2` / GitHub: `tiamatiramisu/mullive-plusplus` / Greasy Fork: [593484](https://greasyfork.org/ko/scripts/593484)
+현재 버전: `v0.26.5` / GitHub: `tiamatiramisu/mullive-plusplus` / Greasy Fork: [593484](https://greasyfork.org/ko/scripts/593484)
 
 ## 스테이지
 
@@ -43,6 +43,42 @@ Stage 1(업스트림 분석)은 `SPEC.md`로 완료.
   현행(채팅 1개)에서도 발생하는 문제이며, Stage 3에서 채팅 iframe이 늘 때 빈도를 관측할 것.
 
 ## 검증 로그
+
+### 2026-10-22 — v0.26.5 Firefox + Violentmonkey 에서 소리가 두 번 난다
+
+**사용자 실측 조합표** — 변수는 브라우저가 아니라 *Firefox 위의 Violentmonkey* 다.
+
+| 브라우저 | 매니저 | 결과 |
+|---|---|---|
+| Chrome | Violentmonkey | 정상 |
+| Firefox | Tampermonkey | 정상 |
+| Firefox | Violentmonkey | **소리가 두 번** |
+
+**먼저 지운 후보.** 채팅 프레임(`?vtype=chat`)은 v0.24.0 부터 스크립트가 돌지만, 그 페이지에는
+`<video>`/`<audio>` 가 아예 없다(`body.popout_chat`, `#btn_sound` 없음 — 직접 열어 확인). 소리 출처가 아니다.
+
+**유력한 원인 (가설).** 출력 경로를 건드리는 코드는 `실제 소리에 반응` 의
+`createMediaElementSource → destination` 하나뿐이다. Firefox+VM 이 플레이어 프레임에 스크립트를
+**두 번** 주입하면 인스턴스 둘이 각자 AudioContext 로 같은 영상을 문다.
+
+- **Chrome 은 이걸 막는다 (실측).** 같은 영상에 두 번째 `createMediaElementSource` 를 걸면
+  AudioContext 가 달라도 `InvalidStateError: HTMLMediaElement already connected` 가 난다.
+  그래서 Chrome+VM 에서는 설령 두 번 주입돼도 두 번째 탭이 실패해 소리가 하나로 남는다.
+- **Firefox 는 다른 AudioContext 면 받아 준다고 알려져 있다 (미확인).** 그러면 그래프가 둘, 소리가 둘이다.
+
+세 줄을 다 설명하는 가설이지만 Firefox 쪽은 아직 직접 재현하지 못했다.
+
+**넣은 방어 — 가설과 무관하게 맞는 변경이다.**
+- 한 프레임에 에이전트가 둘 뜨면 첫 번째만 일한다. 모듈 변수는 주입 경로(페이지/샌드박스)마다 따로라
+  못 나눠 가지므로 **양쪽이 같이 보는 DOM**(`documentElement.dataset.mlppAgentStarts`)에 센 수를 남긴다.
+  두 번 뜨면 소리 외에도 휠클릭 같은 토글이 두 번 먹어 제자리가 되는 문제가 있다.
+- 영상에 `data-mlpp-tapped` 표시. 탭이 성공한 같은 동기 구간에서 찍으므로 다른 인스턴스가 끼어들 틈이 없다.
+- **진단.** 에이전트가 `ready` 에 `starts` 를 실어 보내고, 부모가 `data-mlpp-audio` 끝에
+  `dupes=[0x2,1x2]` 처럼 남긴다. 이게 보이면 중복 주입이 확정이다.
+
+**덤으로 고친 누수.** 설정이 바뀔 때마다 부모가 `analyse` 를 다시 보내는데, 분석기가 이미 있으면
+`requestAnimationFrame(measure)` 를 또 불러 측정 루프가 겹겹이 쌓였다. `startLoop()` 로 하나만 돈다.
+`refractory` 가 보고 횟수는 막고 있어서 겉으로는 안 보였지만 프레임마다 CPU 를 먹고 있었다.
 
 ### 2026-08-31 — v0.26.2 추가 정보 동기화 실패(인코딩) 수정
 

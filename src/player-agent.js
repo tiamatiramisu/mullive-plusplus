@@ -60,6 +60,8 @@ let analyser = /** @type {AnalyserNode | null} */ (null);
 let ctx = /** @type {AudioContext | null} */ (null);
 let buffer = /** @type {Uint8Array<ArrayBuffer> | null} */ (null);
 let analysing = false;
+/** 측정 루프가 돌고 있는가. 설정이 바뀔 때마다 analyse 가 다시 와서, 막지 않으면 루프가 겹겹이 쌓인다. */
+let looping = false;
 let lastSent = 0;
 
 /** 가장 큰 video 를 고른다. 320x240 짜리는 광고용이다. */
@@ -90,8 +92,17 @@ const REFRACTORY_MS = 140;
 
 let avg = 0;
 
+function startLoop() {
+  if (looping) return;
+  looping = true;
+  requestAnimationFrame(measure);
+}
+
 function measure() {
-  if (!analysing) return;
+  if (!analysing) {
+    looping = false;
+    return;
+  }
   requestAnimationFrame(measure);
   if (!analyser || !buffer) return;
 
@@ -119,7 +130,7 @@ function wake() {
 function startAnalyser() {
   analysing = true;
   if (analyser) {
-    requestAnimationFrame(measure);
+    startLoop();
     wake();
     report({ kind: 'analyser', ok: ctx?.state === 'running' });
     return;
@@ -129,12 +140,22 @@ function startAnalyser() {
   if (!video || video.videoWidth === 0) {
     document.addEventListener('playing', () => analysing && startAnalyser(), { capture: true, once: true });
     report({ kind: 'analyser', ok: false });
-    requestAnimationFrame(measure);
+    startLoop();
+    return;
+  }
+  // 이 영상이 이미 그래프에 물려 있으면 다시 물리지 않는다. 표시는 DOM 에 두므로
+  // 주입 경로(페이지/샌드박스)가 달라 변수를 못 나눠 갖는 인스턴스끼리도 보인다.
+  // Chrome 은 두 번째 createMediaElementSource 를 InvalidStateError 로 막아 주지만,
+  // Firefox 는 AudioContext 가 다르면 받아 주어 같은 소리가 두 갈래로 나간다.
+  if (video.dataset.mlppTapped) {
+    report({ kind: 'analyser', ok: false });
     return;
   }
   try {
     ctx = new AudioContext();
     const source = ctx.createMediaElementSource(video);
+    // 성공한 바로 그 자리에서 표시한다. 같은 동기 구간이라 다른 인스턴스가 끼어들 틈이 없다.
+    video.dataset.mlppTapped = '1';
     analyser = ctx.createAnalyser();
     analyser.fftSize = 256;
     source.connect(analyser);
@@ -156,7 +177,7 @@ function startAnalyser() {
     buffer = null;
     report({ kind: 'analyser', ok: false });
   }
-  requestAnimationFrame(measure);
+  startLoop();
 }
 
 function stopAnalyser() {
@@ -170,13 +191,21 @@ export function startPlayerAgent() {
   // 단독 SOOP 탭에서는 아무것도 하지 않는다. 임베드된 프레임일 때만 동작한다.
   if (window.top === window) return;
 
+  // 같은 프레임에 이 스크립트가 두 번 뜨는 환경이 있다(Firefox + Violentmonkey 에서 소리가 두 번 났다).
+  // 둘 다 일하면 영상 하나에 오디오 그래프가 둘 붙고, 휠클릭 같은 토글은 두 번 먹어 제자리가 된다.
+  // 모듈 변수는 주입 경로마다 따로라 못 쓴다. 양쪽이 같이 보는 DOM 에 센 수를 남긴다.
+  const marks = document.documentElement.dataset;
+  const starts = Number(marks.mlppAgentStarts ?? '0') + 1;
+  marks.mlppAgentStarts = String(starts);
+  if (starts > 1) return;
+
   window.addEventListener('message', (e) => {
     if (!PARENT_ORIGIN.test(e.origin)) return;
     const data = /** @type {{ mlpp?: unknown, kind?: string, muted?: unknown, on?: unknown } | null} */ (e.data);
     if (!data || data.mlpp !== true) return;
     if (data.kind === 'hello') {
       parentOrigin = e.origin;
-      report({ kind: 'ready', hasButton: !!soundButton() });
+      report({ kind: 'ready', hasButton: !!soundButton(), starts: Number(marks.mlppAgentStarts ?? '1') });
     } else if (data.kind === 'analyse') {
       if (data.on) startAnalyser();
       else stopAnalyser();
