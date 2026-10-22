@@ -8,6 +8,8 @@
  * 그냥 우클릭은 건드리지 않는다. 채팅에서 닉네임 메뉴나 복사를 쓰는 사람이 있다.
  */
 
+import { countBoot } from './dom.js';
+
 const PARENT_ORIGIN = /^https:\/\/(www\.)?mul\.live$/;
 
 /** @type {string | null} 부모가 인사해 온 origin. 확인되기 전에는 아무것도 보내지 않는다. */
@@ -15,6 +17,8 @@ let parentOrigin = null;
 
 export function startChatAgent() {
   if (window.top === window) return;
+  // 사본이 둘이면 Shift+우클릭 한 번에 칸이 두 개 닫힌다. 첫 번째만 일한다.
+  if (countBoot('Chat') > 1) return;
 
   window.addEventListener('message', (e) => {
     if (!PARENT_ORIGIN.test(e.origin)) return;

@@ -93,6 +93,8 @@ export function createAudioMixer({ players, root, bus }) {
   const analysers = new Set();
   /** @type {Map<number, number>} 스크립트가 두 번 이상 뜬 프레임과 그 횟수. 진단용이다. */
   const dupes = new Map();
+  /** @type {Set<number>} SOOP 스마트 볼륨이 켜져 있어 소리 분석을 쉰 프레임. 진단용이다. */
+  const smart = new Set();
   /**
    * 마스터가 되면서 **우리가** 솔로에 넣은 방송.
    * 마스터를 풀 때 되돌리려면 원래 솔로였는지를 기억해야 한다. -1이면 없음.
@@ -214,7 +216,8 @@ export function createAudioMixer({ players, root, bus }) {
         .map((_, i) => (soloing && !set.has(i) ? i : null))
         .filter((i) => i !== null)
         .join(',')}] agents=[${[...agents].join(',')}] analysers=[${[...analysers].join(',')}]` +
-        (dupes.size ? ` dupes=[${[...dupes].map(([i, n]) => `${i}x${n}`).join(',')}]` : '');
+        (dupes.size ? ` dupes=[${[...dupes].map(([i, n]) => `${i}x${n}`).join(',')}]` : '') +
+        (smart.size ? ` smart=[${[...smart].join(',')}]` : '');
   }
 
   bus.on((index, data) => {
@@ -240,6 +243,8 @@ export function createAudioMixer({ players, root, bus }) {
         // 소리 분석을 걸 수 있었는지. 실패해도 주기 파동이 있어 표시는 유지된다.
         if (data.ok) analysers.add(index);
         else analysers.delete(index);
+        if (data.smart) smart.add(index);
+        else smart.delete(index);
         apply();
         break;
       case 'hover':

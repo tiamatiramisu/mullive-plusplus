@@ -1,6 +1,6 @@
 # mullive-plusplus STATUS
 
-현재 버전: `v0.26.5` / GitHub: `tiamatiramisu/mullive-plusplus` / Greasy Fork: [593484](https://greasyfork.org/ko/scripts/593484)
+현재 버전: `v0.26.6` / GitHub: `tiamatiramisu/mullive-plusplus` / Greasy Fork: [593484](https://greasyfork.org/ko/scripts/593484)
 
 ## 스테이지
 
@@ -43,6 +43,37 @@ Stage 1(업스트림 분석)은 `SPEC.md`로 완료.
   현행(채팅 1개)에서도 발생하는 문제이며, Stage 3에서 채팅 iframe이 늘 때 빈도를 관측할 것.
 
 ## 검증 로그
+
+### 2026-10-22 — v0.26.6 소리 두 벌의 진짜 원인: SOOP 스마트 볼륨
+
+**바로 아래 v0.26.5 항목의 가설은 전부 틀렸다.** 이중 주입도, "Firefox 가 탭한 영상의 원래 출력을 안 끈다"도,
+"Tampermonkey 는 샌드박스라 탭이 안 걸린다"도 아니다. 매니저는 헛다리였다.
+
+**결정적인 단서는 사용자의 타임라인이었다.**
+TM 정상(스펙트럼도 정상 반응) → VM 설치 + TM 끔 → **그 사이 SOOP 스마트 볼륨을 켬** → VM 에서 두 벌
+→ VM 끄고 TM 다시 켬 → **TM 에서도 두 벌**. 같은 TM 사본이 갑자기 두 벌을 냈으니 변수는 매니저가 아니었다.
+
+**SOOP 플레이어 번들을 받아 확인했다.** `LivePlayer.js?_=202610201100`(2026-10-20 빌드)에
+`soop-loudness` 모듈이 있고 `createMediaElementSource` · `createGain` · `destination` 을 쓴다.
+켜짐 여부는 쿠키 `_smartVolume`, 플레이어는 `decodeURIComponent` → `URLSearchParams` 로 `active === '1'` 을 본다.
+
+**SOOP 이 실제로 영상을 무는 것을 실측했다(내장 브라우저, Chromium).**
+- 스마트 볼륨 끔, 조작 없음 → 우리 탭이 통과. SOOP 은 안 물었다
+- 스마트 볼륨 켬 + 클릭 한 번 → 우리 탭이 **`InvalidStateError`** 로 막혔다. SOOP 이 먼저 물었다
+그래서 Chrome 은 조용했고(두 번째 탭을 막음), Firefox 는 받아 주어 두 벌이 났다.
+처음 Chromium 에서 "SOOP 은 안 문다"고 본 것은 클릭이 없어 SOOP 의 AudioContext 가 아직 안 돌았기 때문이다.
+
+**고친 것.** 플레이어 에이전트가 물기 직전마다 `_smartVolume` 쿠키를 같은 방식으로 읽어, 켜져 있으면 물지 않는다.
+판정이 SOOP 토글과 같은 결론을 내는지 실제 플레이어 페이지에서 켜짐/꺼짐 둘 다 확인했다.
+설정 패널 `실제 소리에 반응` 설명에 한 줄 추가. 진단 `data-mlpp-audio` 에 `smart=[…]`.
+앞서 넣은 "Firefox 면 무조건 건너뛰기"는 틀린 진단에서 나온 것이라 걷었다 — 스마트 볼륨이 꺼져 있으면
+Firefox 에서도 정상이다(사용자 실측).
+
+**남긴 것.** v0.26.5 의 중복 방지(`countBoot`, `data-mlpp-tapped`)와 측정 루프 누수 수정은 원인과 무관하게
+옳은 변경이라 그대로 둔다. 사본이 둘이면 실제로 채팅 iframe 이 두 벌 생기고 칸이 두 개씩 닫힌다.
+
+**알려진 한계.** 이미 문 뒤에 스마트 볼륨을 켜면 되돌릴 수 없다. Firefox 는 그때부터 두 벌,
+Chrome 은 SOOP 쪽 탭이 막혀 평준화가 안 된다. 새로고침하면 풀린다 — 설정 패널 문구에 적어 두었다.
 
 ### 2026-10-22 — v0.26.5 Firefox + Violentmonkey 에서 소리가 두 번 난다
 

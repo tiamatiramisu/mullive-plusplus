@@ -1,5 +1,5 @@
 /* global GM_info */
-import { waitForHooks, readChatOptions, log, warn } from './dom.js';
+import { waitForHooks, readChatOptions, log, warn, countBoot } from './dom.js';
 import { getStyleMode } from './style.js';
 import * as settings from './settings.js';
 import { createChatManager } from './chats.js';
@@ -23,6 +23,9 @@ const SOOP_CHAT = /^https:\/\/play\.sooplive\.(com|co\.kr)\//;
 if (SOOP_HOST.test(location.hostname)) {
   if (/vtype=chat/.test(location.search)) startChatAgent();
   else startPlayerAgent();
+} else if (countBoot('Page') > 1) {
+  // 사본이 둘이면 채팅 iframe 이 방송마다 둘씩 생기고 패널도 겹친다. 먼저 뜬 쪽에 맡긴다.
+  warn('이 스크립트가 이 페이지에서 이미 돌고 있습니다. 유저스크립트 매니저에 같은 스크립트가 두 번 설치돼 있는지 확인하세요.');
 } else {
   // 플레이어 준비 신호는 훅을 찾기 전에도 올 수 있다. 가장 먼저 걸어둔다.
   watchPlayers();

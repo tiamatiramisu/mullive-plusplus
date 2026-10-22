@@ -130,7 +130,7 @@ export const SCHEMA = [
     type: 'bool',
     value: 1,
     indent: true,
-    help: '깜빡임이 실제 소리를 반영합니다. 렉이 걸린다면 비활성화 해주세요.',
+    help: '깜빡임이 실제 소리를 반영합니다. 렉이 걸린다면 비활성화 해주세요. SOOP 스마트 볼륨이 켜진 방송은 분석하지 않아요(바꾼 뒤엔 새로고침).',
   },
   {
     key: 'urlSync',

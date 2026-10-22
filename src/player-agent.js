@@ -9,6 +9,8 @@
  * PsetDarkMode/PisPlayerWatching 뿐). 대신 프레임 안에서 음소거 버튼을 직접 누른다.
  */
 
+import { countBoot } from './dom.js';
+
 const PARENT_ORIGIN = /^https:\/\/(www\.)?mul\.live$/;
 /** 가운데 클릭으로 볼 영역. 아래쪽 컨트롤 바와 위쪽 방송 정보는 플레이어에 넘긴다. */
 const CENTER = { x0: 0.2, x1: 0.8, y0: 0.2, y1: 0.7 };
@@ -127,7 +129,33 @@ function wake() {
   ctx?.resume().catch(() => {});
 }
 
+/**
+ * SOOP 스마트 볼륨이 켜져 있는가.
+ *
+ * 스마트 볼륨(2026-10-20 플레이어 빌드의 soop-loudness)은 영상을 **SOOP 자신의**
+ * createMediaElementSource 로 물어 자기 그래프(게인 → destination)로 소리를 낸다.
+ * 거기에 우리까지 물면 한 영상의 소리가 두 그래프로 나간다.
+ * - Firefox 는 다른 AudioContext 의 두 번째 탭을 받아 준다 → 들리는 방송마다 소리가 두 벌
+ * - Chrome 은 두 번째 탭을 InvalidStateError 로 막는다 → 우리가 먼저 물면 SOOP 이 평준화를 포기한다
+ * 어느 쪽이든 우리가 비켜야 한다. 플레이어가 켤지 정할 때 읽는 쿠키를 같은 방식으로 읽는다.
+ * (쓰는 쪽: `_smartVolume=active=1&noticed=1`, 읽는 쪽: decodeURIComponent → URLSearchParams)
+ */
+function smartVolumeOn() {
+  const m = document.cookie.match(/(?:^|;\s*)_smartVolume=([^;]*)/);
+  if (!m) return false;
+  try {
+    return new URLSearchParams(decodeURIComponent(m[1])).get('active') === '1';
+  } catch {
+    return false;
+  }
+}
+
 function startAnalyser() {
+  // 탭은 되돌릴 수 없으니 물기 직전마다 다시 본다. 페이지를 연 뒤에 켰을 수도 있다.
+  if (smartVolumeOn()) {
+    report({ kind: 'analyser', ok: false, smart: true });
+    return;
+  }
   analysing = true;
   if (analyser) {
     startLoop();
@@ -143,8 +171,8 @@ function startAnalyser() {
     startLoop();
     return;
   }
-  // 이 영상이 이미 그래프에 물려 있으면 다시 물리지 않는다. 표시는 DOM 에 두므로
-  // 주입 경로(페이지/샌드박스)가 달라 변수를 못 나눠 갖는 인스턴스끼리도 보인다.
+  // 이 영상이 이미 우리 그래프에 물려 있으면 다시 물리지 않는다. 표시는 DOM 에 두므로
+  // 사본이 둘이어도(매니저 둘, 주입 두 번) 서로 보인다.
   // Chrome 은 두 번째 createMediaElementSource 를 InvalidStateError 로 막아 주지만,
   // Firefox 는 AudioContext 가 다르면 받아 주어 같은 소리가 두 갈래로 나간다.
   if (video.dataset.mlppTapped) {
@@ -191,13 +219,9 @@ export function startPlayerAgent() {
   // 단독 SOOP 탭에서는 아무것도 하지 않는다. 임베드된 프레임일 때만 동작한다.
   if (window.top === window) return;
 
-  // 같은 프레임에 이 스크립트가 두 번 뜨는 환경이 있다(Firefox + Violentmonkey 에서 소리가 두 번 났다).
-  // 둘 다 일하면 영상 하나에 오디오 그래프가 둘 붙고, 휠클릭 같은 토글은 두 번 먹어 제자리가 된다.
-  // 모듈 변수는 주입 경로마다 따로라 못 쓴다. 양쪽이 같이 보는 DOM 에 센 수를 남긴다.
-  const marks = document.documentElement.dataset;
-  const starts = Number(marks.mlppAgentStarts ?? '0') + 1;
-  marks.mlppAgentStarts = String(starts);
-  if (starts > 1) return;
+  // 사본이 둘이면 첫 번째만 일한다(countBoot 주석). Firefox 는 다른 AudioContext 의
+  // 두 번째 createMediaElementSource 를 받아 주어 소리가 두 벌 났다. Chrome 은 막는다.
+  if (countBoot('Player') > 1) return;
 
   window.addEventListener('message', (e) => {
     if (!PARENT_ORIGIN.test(e.origin)) return;
@@ -205,7 +229,7 @@ export function startPlayerAgent() {
     if (!data || data.mlpp !== true) return;
     if (data.kind === 'hello') {
       parentOrigin = e.origin;
-      report({ kind: 'ready', hasButton: !!soundButton(), starts: Number(marks.mlppAgentStarts ?? '1') });
+      report({ kind: 'ready', hasButton: !!soundButton(), starts: Number(document.documentElement.dataset.mlppBootPlayer ?? '1') });
     } else if (data.kind === 'analyse') {
       if (data.on) startAnalyser();
       else stopAnalyser();

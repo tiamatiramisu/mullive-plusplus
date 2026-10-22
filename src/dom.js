@@ -97,3 +97,22 @@ export function log(...args) {
 export function warn(...args) {
   console.warn(TAG, ...args);
 }
+
+/**
+ * 이 문서에 이 스크립트가 몇 번째로 떴는지 센다. 처음이면 1.
+ *
+ * 매니저에 사본이 둘 깔려 있으면(예: Greasy Fork 판과 로컬 감시 판이 같이 켜짐) 같은 문서에서 두 번 돈다.
+ * 둘 다 일하면 플레이어 프레임에서는 영상 하나에 오디오 그래프가 둘 붙어 소리가 두 벌 나고,
+ * 부모에서는 채팅 iframe 이 방송마다 둘씩 생기고, 채팅 프레임에서는 칸이 두 개씩 닫힌다.
+ * 모듈 변수는 사본마다 따로라 못 쓴다. 사본끼리 같이 보는 DOM 에 센 수를 남긴다.
+ *
+ * @param {string} role 역할마다 따로 센다. 한 문서에서 역할이 겹칠 일은 없지만 진단할 때 구별된다.
+ * @returns {number}
+ */
+export function countBoot(role) {
+  const marks = document.documentElement.dataset;
+  const key = `mlppBoot${role}`;
+  const n = Number(marks[key] ?? '0') + 1;
+  marks[key] = String(n);
+  return n;
+}
